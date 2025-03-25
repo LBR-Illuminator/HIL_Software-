@@ -1,0 +1,7 @@
+robotframework>=6.0.0
+robotframework-seriallibrary>=0.4.0
+pyserial>=3.5
+robotframework-jsonlibrary>=0.5
+jsonschema>=4.17.3
+robotframework-requests>=0.9.4
+robotframework-pythonlibcore>=4.1.2

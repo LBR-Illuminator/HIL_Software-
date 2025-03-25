@@ -1,0 +1,77 @@
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Robot Framework
+output.xml
+log.html
+report.html
+*.html
+logs/
+results/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.project
+.pydevproject
+.settings/
+*.sublime-workspace
+*.sublime-project
+
+# OS specific
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Project specific
+*.log
+hw_simulator.log
+serial_logs/
+temp/
+config.local.yaml
+
+# Binaries and data files
+*.exe
+*.bin
+*.hex
+*.elf
+*.dat
+*.csv
+*.xlsx
+*.db
+*.sqlite3
+
+# Backup files
+*~
+*.bak
+*.backup
