@@ -17,15 +17,109 @@ ${TIMESTAMP_FORMAT}   %Y%m%d-%H%M%S
 Open Serial Connection
     [Documentation]    Open a serial connection with the specified parameters
     [Arguments]    ${port}    ${baud_rate}    ${timeout}=5
-    SerialLibrary.Add Port    ${port}    baudrate=${baud_rate}    timeout=${timeout}
-    ${is_open}=    SerialLibrary.Port Is Open
-    Should Be True    ${is_open}    Failed to open serial port ${port}
-    Log    Serial connection opened on port ${port} at ${baud_rate} baud
+    TRY
+        SerialLibrary.Add Port    ${port}    baudrate=${baud_rate}    timeout=${timeout}
+        SerialLibrary.Port Should Be Open    message=Failed to open serial port ${port}
+        Log    Serial connection opened on port ${port} at ${baud_rate} baud
+    EXCEPT
+        List Available Serial Ports
+        Fail    Failed to open serial connection on port ${port}. See available ports above.
+    END
 
 Serial Connection Should Be Open
     [Documentation]    Verify that a serial connection is open
-    ${is_open}=    SerialLibrary.Port Is Open
-    Should Be True    ${is_open}    No serial connection is open
+    TRY
+        SerialLibrary.Port Should Be Open    message=No serial connection is open
+    EXCEPT
+        List Available Serial Ports
+        Fail    No serial connection is open. See available ports above.
+    END
+
+List Available Serial Ports
+    [Documentation]    Lists all available serial ports on the system
+    ${os}=    Evaluate    platform.system()    platform
+    IF    '${os}' == 'Windows'
+        List Windows Serial Ports
+    ELSE IF    '${os}' == 'Darwin'
+        List Mac Serial Ports
+    ELSE
+        List Linux Serial Ports
+    END
+
+List Windows Serial Ports
+    [Documentation]    List available serial ports on Windows
+    Log    Checking available COM ports on Windows:    console=True
+    
+    # Try using mode command which works in all Windows versions
+    ${mode_result}=    Run Process    mode    shell=True
+    
+    # Extract COM lines from mode output
+    ${mode_lines}=    Split To Lines    ${mode_result.stdout}
+    ${com_lines}=    Evaluate    [line.strip() for line in $mode_lines if "COM" in line]
+    
+    # If we found COM ports with mode, display them
+    IF    len($com_lines) > 0
+        Log    Found COM ports using 'mode' command:    console=True
+        FOR    ${line}    IN    @{com_lines}
+            Log    - ${line}    console=True
+        END
+    ELSE
+        # Alternative method using PowerShell
+        ${ps_cmd}=    Set Variable    powershell -Command "[System.IO.Ports.SerialPort]::GetPortNames()"
+        ${ps_result}=    Run Process    ${ps_cmd}    shell=True
+        
+        # Clean and parse the output
+        ${ps_ports}=    Split To Lines    ${ps_result.stdout}
+        ${ps_ports}=    Evaluate    [port.strip() for port in $ps_ports if port.strip()]
+        
+        IF    len($ps_ports) > 0
+            Log    Found COM ports using PowerShell:    console=True
+            FOR    ${port}    IN    @{ps_ports}
+                Log    - ${port}    console=True
+            END
+        ELSE
+            # Last resort - check common COM ports
+            Log    No COM ports detected. Checking common port names:    console=True
+            FOR    ${i}    IN RANGE    1    20
+                ${port}=    Set Variable    COM${i}
+                ${exists}=    Run Process    cmd    /c    echo Checking ${port}>\\.\${port}    shell=True
+                ${status}=    Evaluate    $exists.rc == 0
+                IF    ${status}
+                    Log    - ${port} (may be available)    console=True
+                END
+            END
+        END
+    END
+    
+    # General advice for Windows users
+    Log    \nTo see all COM ports on your system:    console=True
+    Log    1. Open Device Manager    console=True
+    Log    2. Expand 'Ports (COM & LPT)'    console=True
+    Log    3. Check which COM ports are listed    console=True
+
+List Mac Serial Ports
+    [Documentation]    List available serial ports on macOS
+    ${result}=    Run Process    ls    -1    /dev/tty.*    /dev/cu.*    shell=True
+    @{ports}=    Split String    ${result.stdout}    ${NEWLINE}
+    Log    Available Serial Ports on macOS:    console=True
+    FOR    ${port}    IN    @{ports}
+        ${port}=    Strip String    ${port}
+        IF    '${port}' != ''
+            Log    - ${port}    console=True
+        END
+    END
+
+List Linux Serial Ports
+    [Documentation]    List available serial ports on Linux
+    ${result}=    Run Process    ls    -1    /dev/ttyS*    /dev/ttyUSB*    /dev/ttyACM*    shell=True
+    @{ports}=    Split String    ${result.stdout}    ${NEWLINE}
+    Log    Available Serial Ports on Linux:    console=True
+    FOR    ${port}    IN    @{ports}
+        ${port}=    Strip String    ${port}
+        IF    '${port}' != ''
+            Log    - ${port}    console=True
+        END
+    END
 
 Wait For Response
     [Documentation]    Wait for a response from the serial port

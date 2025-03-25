@@ -11,7 +11,7 @@ Suite Setup       Initialize Test Environment
 Suite Teardown    Cleanup Test Environment
 
 *** Variables ***
-${SERIAL_PORT}    COM3    # Default port, override with -v SERIAL_PORT:COM4
+${SERIAL_PORT}    COM19    # Default port, override with -v SERIAL_PORT:COM4
 ${BAUD_RATE}      115200
 ${TIMEOUT}        5
 
