@@ -81,6 +81,7 @@ Examples:
 ```bash
 # Windows - Run all tests on COM4 with default timeout
 run_tests.bat COM4
+robot --consolewidth 0 -v SERIAL_PORT:COM19 wiseled_test_suite.robot
 
 # Linux - Run only communication tests on /dev/ttyUSB0 with 10 second timeout
 ./run_tests.sh /dev/ttyUSB0 communication 10

@@ -1,14 +1,13 @@
 @echo off
-REM Simple launcher script for Wiseled_LBR HIL tests (Windows version)
+REM Enhanced launcher script for Wiseled_LBR HIL tests (Windows version) with cleaner output
 
 REM Activate virtual environment if it exists
 if exist venv\Scripts\activate.bat (
-    echo Activating virtual environment...
-    call venv\Scripts\activate.bat
+    call venv\Scripts\activate.bat >nul 2>&1
 )
 
 REM Default values
-set DEFAULT_PORT=COM3
+set DEFAULT_PORT=COM19
 set DEFAULT_TAGS=all
 set DEFAULT_TIMEOUT=5
 
@@ -37,26 +36,44 @@ set TIMESTAMP=%datetime:~0,8%_%datetime:~8,6%
 set LOG_DIR=logs\%TIMESTAMP%
 mkdir "%LOG_DIR%" 2>nul
 
-echo ==============================================
-echo   Wiseled_LBR HIL Test Runner
-echo ==============================================
-echo Serial Port: %PORT%
-echo Test Tags:   %TAGS%
-echo Timeout:     %TIMEOUT% seconds
-echo Log Dir:     %LOG_DIR%
-echo ==============================================
+cls
+echo.
+echo =====================================================
+echo              Wiseled_LBR Test Runner
+echo =====================================================
+echo.
+echo   Port: %PORT%  ^|  Tags: %TAGS%  ^|  Timeout: %TIMEOUT%s
+echo.
+echo =====================================================
+echo.
 
-REM Run the robot tests
+REM Run the robot tests with cleaner output
+echo Starting test execution...
+echo.
+
 if "%TAGS%"=="all" (
-    REM Run all tests
-    robot --outputdir "%LOG_DIR%" -v SERIAL_PORT:"%PORT%" -v TIMEOUT:"%TIMEOUT%" wiseled_test_suite.robot
+    REM Run all tests with cleaner output
+    call robot --outputdir "%LOG_DIR%" --consolewidth 0 --console dotted --nostatusrc -v SERIAL_PORT:%PORT% -v TIMEOUT:%TIMEOUT% wiseled_test_suite.robot
 ) else (
-    REM Run only tests with the specified tag
-    robot --outputdir "%LOG_DIR%" -v SERIAL_PORT:"%PORT%" -v TIMEOUT:"%TIMEOUT%" -i "%TAGS%" wiseled_test_suite.robot
+    REM Run only tests with the specified tag with cleaner output
+    call robot --outputdir "%LOG_DIR%" --consolewidth 0 --console dotted --nostatusrc -v SERIAL_PORT:%PORT% -v TIMEOUT:%TIMEOUT% -i %TAGS% wiseled_test_suite.robot
+)
+
+REM Check if the test failed
+if %ERRORLEVEL% neq 0 (
+    echo.
+    echo [31mTests completed with errors. Error level: %ERRORLEVEL%[0m
+) else (
+    echo.
+    echo [32mAll tests completed successfully.[0m
 )
 
 REM Copy the most recent results to the root directory for easy access
-copy "%LOG_DIR%\report.html" "report.html"
-copy "%LOG_DIR%\log.html" "log.html"
+copy "%LOG_DIR%\report.html" "report.html" >nul
+copy "%LOG_DIR%\log.html" "log.html" >nul
 
-echo Tests completed. Results are in %LOG_DIR% and copied to the project root.
+echo.
+echo Results saved to %LOG_DIR% and copied to the project root.
+echo.
+echo Open report.html in your browser to view detailed results.
+echo.
