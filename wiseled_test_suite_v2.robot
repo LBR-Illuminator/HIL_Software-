@@ -5,7 +5,7 @@ Documentation     Master test suite for Wiseled_LBR Illuminator system
 
 Library           OperatingSystem
 Library           Collections
-Library           resources/serial_helper.py
+Library           resources/SerialHelper.py
 
 Suite Setup       Initialize Test Environment
 Suite Teardown    Cleanup Test Environment
