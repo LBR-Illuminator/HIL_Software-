@@ -14,8 +14,8 @@ Suite Setup       Initialize Test Environment
 Suite Teardown    Cleanup Test Environment
 
 *** Variables ***
-${ILLUMINATOR_PORT}    COM20     # Default port for Illuminator, override with -v ILLUMINATOR_PORT:COM4
-${HIL_PORT}            COM19    # Default port for HIL board, override with -v HIL_PORT:COM19
+${ILLUMINATOR_PORT}    COM19     # Default port for Illuminator, override with -v ILLUMINATOR_PORT:COM4
+${HIL_PORT}            COM20    # Default port for HIL board, override with -v HIL_PORT:COM19
 ${BAUD_RATE}           115200
 ${TIMEOUT}             5
 ${RETRY_MAX}           3        # Maximum number of retry attempts

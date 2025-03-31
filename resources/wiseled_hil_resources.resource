@@ -7,7 +7,7 @@ Library           Collections
 Library           String
 Library           DateTime
 Library           EnhancedSerialHelper.py    WITH NAME    SerialHelper
-Library           hil_protocol.py
+Library           HILProtocol.py        WITH NAME    HILProtocol
 
 *** Variables ***
 ${TIMEOUT}               5     # Default timeout in seconds
