@@ -1,13 +1,13 @@
 *** Settings ***
-Documentation     Resource file for Wiseled_LBR HIL testing
-...               Contains common keywords and utilities for testing both the Illuminator and HIL hardware
+Documentation     Improved resource file for Wiseled_LBR HIL testing
+...               Provides dedicated connection management for both devices
 
 Library           OperatingSystem
 Library           Collections
 Library           String
 Library           DateTime
-Library           EnhancedSerialHelper.py    WITH NAME    SerialHelper
-Library           HILProtocol.py        WITH NAME    HILProtocol
+Library           ${CURDIR}/ImprovedSerialHelper.py    WITH NAME    SerialHelper
+Library           ${CURDIR}/ImprovedHILProtocol.py     WITH NAME    HILProtocol
 
 *** Variables ***
 ${TIMEOUT}               5     # Default timeout in seconds
@@ -40,21 +40,31 @@ ${TEMP_THRESHOLD}        85     # 85 degrees Celsius
 ################################
 
 Open Illuminator Connection
-    [Documentation]    Open a connection to the Illuminator device
+    [Documentation]    Open a dedicated connection to the Illuminator device
     [Arguments]    ${port}    ${baudrate}=115200    ${timeout}=5
-    ${result}=    SerialHelper.Open Serial Port    ${port}    ${baudrate}    ${timeout}    illuminator
+    ${result}=    SerialHelper.Open Illuminator Connection    ${port}    ${baudrate}    ${timeout}
     RETURN    ${result}
 
 Open HIL Connection
-    [Documentation]    Open a connection to the HIL hardware
+    [Documentation]    Open a dedicated connection to the HIL hardware
     [Arguments]    ${port}    ${baudrate}=115200    ${timeout}=5
-    ${result}=    SerialHelper.Open Serial Port    ${port}    ${baudrate}    ${timeout}    hil
-    HILProtocol.Set Serial Helper    SerialHelper
+    ${result}=    SerialHelper.Open HIL Connection    ${port}    ${baudrate}    ${timeout}
+    HILProtocol.Set Serial Helper    ${SerialHelper}
     RETURN    ${result}
+
+Is Illuminator Connected
+    [Documentation]    Check if Illuminator is connected
+    ${connected}=    SerialHelper.Is Illuminator Connected
+    RETURN    ${connected}
+
+Is HIL Connected
+    [Documentation]    Check if HIL board is connected
+    ${connected}=    SerialHelper.Is HIL Connected
+    RETURN    ${connected}
 
 Close All Connections
     [Documentation]    Close all serial connections
-    SerialHelper.Close Serial Port
+    SerialHelper.Close All Connections
 
 #################################
 # Illuminator Communication Keywords
@@ -72,14 +82,28 @@ Retry Illuminator Command
     
     FOR    ${i}    IN RANGE    1    ${retry_count} + 1
         ${response}=    Send Illuminator Command    ${command_dict}
-        ${status}=    Set Variable    ${response}[data][status]
         
-        IF    "${status}" == "${expected_status}"
-            RETURN    ${response}
-        ELSE
-            Log    Retry ${i}/${retry_count}: Command failed with status ${status}    console=yes
-            Sleep    ${retry_delay}s
+        # Check if response has data and status
+        ${has_status}=    Run Keyword And Return Status
+        ...    Dictionary Should Contain Key    ${response}    data
+        
+        # If we have data and status matches expected, return
+        IF    ${has_status}
+            ${data_has_status}=    Run Keyword And Return Status
+            ...    Dictionary Should Contain Key    ${response}[data]    status
+            
+            IF    ${data_has_status}
+                ${status}=    Set Variable    ${response}[data][status]
+                
+                IF    "${status}" == "${expected_status}"
+                    RETURN    ${response}
+                END
+            END
         END
+        
+        # If we get here, command failed or invalid response
+        Log    Retry ${i}/${retry_count}: Command failed or invalid response    console=yes
+        Sleep    ${retry_delay}s
     END
     
     # If we get here, all retries failed
@@ -215,17 +239,6 @@ Clear Alarm
 # HIL Communication Keywords
 #################################
 
-Send HIL Command
-    [Documentation]    Send a binary command to the HIL hardware
-    [Arguments]    ${cmd_type}    ${light_id}    ${signal_type}    ${value}
-    ${response}=    HILProtocol.Send Command    ${cmd_type}    ${light_id}    ${signal_type}    ${value}
-    RETURN    ${response}
-
-Ping HIL
-    [Documentation]    Send a ping command to the HIL hardware
-    ${response}=    HILProtocol.Ping
-    RETURN    ${response}
-
 Get PWM Duty Cycle
     [Documentation]    Get the PWM duty cycle for a specific light
     [Arguments]    ${light_id}
@@ -243,6 +256,11 @@ Set Temperature Simulation
     [Arguments]    ${light_id}    ${temperature_c}
     ${result}=    HILProtocol.Set Temperature Simulation    ${light_id}    ${temperature_c}
     RETURN    ${result}
+
+Ping HIL
+    [Documentation]    Send a ping command to the HIL hardware
+    ${response}=    HILProtocol.Ping
+    RETURN    ${response}
 
 #################################
 # Utility Keywords
@@ -263,101 +281,4 @@ Verify Value Within Tolerance
     [Arguments]    ${expected}    ${actual}    ${tolerance_percent}=${TOLERANCE_PERCENT}    ${name}=Value
     
     ${min_acceptable}=    Evaluate    ${expected} * (1 - ${tolerance_percent}/100)
-    ${max_acceptable}=    Evaluate    ${expected} * (1 + ${tolerance_percent}/100)
-    
-    ${within_range}=    Evaluate    ${min_acceptable} <= ${actual} <= ${max_acceptable}
-    
-    IF    ${within_range}
-        Log    ${name}: Expected=${expected}, Actual=${actual} - within ${tolerance_percent}% tolerance - OK    console=yes
-        RETURN    ${TRUE}
-    ELSE
-        ${error_msg}=    Set Variable    ${name}: Expected=${expected}, Actual=${actual} - outside ${tolerance_percent}% tolerance
-        Log    ${error_msg}    console=yes  level=WARN
-        RETURN    ${FALSE}
-    END
-
-Check For Alarm
-    [Documentation]    Check if a specific alarm is active
-    [Arguments]    ${light_id}    ${alarm_code}
-    
-    ${response}=    Get Alarm Status
-    ${has_alarms}=    Run Keyword And Return Status    Dictionary Should Contain Key    ${response}[data]    active_alarms
-    
-    IF    ${has_alarms}
-        ${alarms}=    Set Variable    ${response}[data][active_alarms]
-        FOR    ${alarm}    IN    @{alarms}
-            IF    ${alarm}[light] == ${light_id} and "${alarm}[code]" == "${alarm_code}"
-                RETURN    ${TRUE}
-            END
-        END
-    END
-    
-    RETURN    ${FALSE}
-
-Setup Safe Conditions
-    [Documentation]    Set up safe conditions for all lights
-    
-    # Set all simulated sensors to safe values
-    FOR    ${light_id}    IN RANGE    1    4
-        Set Current Simulation    ${light_id}    1000
-        Set Temperature Simulation    ${light_id}    50
-    END
-    
-    # Clear any existing alarms
-    ${clear_cmd}=    Create Dictionary
-    ...    type=cmd
-    ...    id=clear-all-alarms
-    ...    topic=alarm
-    ...    action=clear
-    ...    data={"lights": [1, 2, 3]}
-    
-    Send Illuminator Command    ${clear_cmd}
-    
-    # Turn all lights off
-    ${set_cmd}=    Create Dictionary
-    ...    type=cmd
-    ...    id=all-lights-off
-    ...    topic=light
-    ...    action=set_all
-    ...    data={"intensities": [0, 0, 0]}
-    
-    Send Illuminator Command    ${set_cmd}
-
-Verify PWM Output
-    [Documentation]    Verify PWM output for a light matches expected intensity
-    [Arguments]    ${light_id}    ${expected_intensity}
-    
-    Wait For Stable Reading    0.5
-    ${duty_cycle}=    Get PWM Duty Cycle    ${light_id}
-    
-    # Special case for extreme values (0% and 100%) since HIL can't measure precisely
-    IF    ${expected_intensity} == 0
-        ${result}=    Evaluate    ${duty_cycle} < 5
-        IF    not ${result}
-            Log    Light ${light_id} expected to be OFF (0%) but measured ${duty_cycle}%    console=yes    level=WARN
-        ELSE
-            Log    Light ${light_id} OFF (${duty_cycle}%) - OK    console=yes
-        END
-        RETURN    ${result}
-    ELSIF    ${expected_intensity} == 100
-        ${result}=    Evaluate    ${duty_cycle} > 95
-        IF    not ${result}
-            Log    Light ${light_id} expected to be FULL (100%) but measured ${duty_cycle}%    console=yes    level=WARN
-        ELSE
-            Log    Light ${light_id} FULL (${duty_cycle}%) - OK    console=yes
-        END
-        RETURN    ${result}
-    ELSE
-        # Normal case - verify within tolerance
-        ${min_acceptable}=    Evaluate    ${expected_intensity} - 2
-        ${max_acceptable}=    Evaluate    ${expected_intensity} + 2
-        ${within_range}=    Evaluate    ${min_acceptable} <= ${duty_cycle} <= ${max_acceptable}
-        
-        IF    ${within_range}
-            Log    Light ${light_id} at ${duty_cycle}% (expected ${expected_intensity}%) - OK    console=yes
-        ELSE
-            Log    Light ${light_id} at ${duty_cycle}% - outside acceptable range for expected ${expected_intensity}%    console=yes    level=WARN
-        END
-        
-        RETURN    ${within_range}
-    END
+    ${max_acceptable}=    Evaluate    ${expected} * (1 + ${tolerance_percent}/100

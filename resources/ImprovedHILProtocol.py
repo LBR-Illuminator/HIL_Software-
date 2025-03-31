@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
-HIL Protocol Helper for Wiseled_LBR Testing
+Improved HIL Protocol Helper for Wiseled_LBR Testing
 
 This module provides functions to handle the binary communication protocol
-with the Hardware-in-the-Loop (HIL) testing hardware.
+with the Hardware-in-the-Loop (HIL) testing hardware, using a dedicated
+serial connection.
 """
 
 import struct
 import time
 
-class HILProtocol:
-    """Helper class for HIL protocol operations"""
+class ImprovedHILProtocol:
+    """Helper class for HIL protocol operations with dedicated serial connection"""
     
     # Protocol constants
     START_MARKER = 0xAA
@@ -39,6 +40,7 @@ class HILProtocol:
             serial_helper: Instance of SerialHelper for serial communication
         """
         self.serial = serial_helper
+        self.debug = True
 
     def set_serial_helper(self, serial_helper):
         """Set the serial helper after initialization"""
@@ -62,9 +64,12 @@ class HILProtocol:
             light_id = str(light_id)
             
         # Convert values to appropriate types
-        cmd_byte = cmd_type.encode('ascii')[0]
-        light_byte = light_id.encode('ascii')[0]
-        signal_byte = signal_type.encode('ascii')[0]
+        cmd_byte = ord(cmd_type) if isinstance(cmd_type, str) else cmd_type
+        light_byte = ord(light_id) if isinstance(light_id, str) else light_id
+        signal_byte = ord(signal_type) if isinstance(signal_type, str) else signal_type
+        
+        # Ensure value is an integer
+        value = int(value)
         value_bytes = struct.pack("<H", value)  # Little-endian 16-bit value
         
         # Calculate checksum (XOR of all data bytes)
@@ -82,6 +87,10 @@ class HILProtocol:
             self.END_MARKER     # End marker
         ])
         
+        if self.debug:
+            cmd_str = ' '.join([f'0x{b:02X}' for b in command])
+            print(f"HIL Command: {cmd_str}")
+        
         return command
     
     def parse_response(self, response_bytes):
@@ -94,6 +103,10 @@ class HILProtocol:
         Returns:
             Dictionary with parsed response data
         """
+        if self.debug and response_bytes:
+            resp_str = ' '.join([f'0x{b:02X}' for b in response_bytes])
+            print(f"HIL Response: {resp_str}")
+            
         # Check if response has valid length
         if len(response_bytes) < 4:
             return {'error': 'Response too short'}
@@ -101,46 +114,51 @@ class HILProtocol:
         # Check start and end markers
         if response_bytes[0] != self.START_MARKER or response_bytes[-1] != self.END_MARKER:
             return {'error': 'Invalid markers'}
-            
-        # Extract response data
-        if len(response_bytes) == 4:
-            # Simple status response
-            status_byte = response_bytes[1]
-            checksum = response_bytes[2]
-            
-            # Check checksum
-            if checksum != status_byte:
-                return {'error': 'Invalid checksum'}
+        
+        # Check for OK response (cmd byte is 'O')
+        if response_bytes[1] == ord('O') or response_bytes[1] == ord(self.RESPONSE_OK):
+            # This is a success response
+            if len(response_bytes) == 8:
+                # Full response with data
+                light_byte = response_bytes[2]
+                signal_byte = response_bytes[3]
+                value_low = response_bytes[4]
+                value_high = response_bytes[5]
+                checksum = response_bytes[6]
                 
-            # Parse status
-            if status_byte == ord(self.RESPONSE_OK):
-                return {'status': 'ok'}
+                # Combine value bytes (little endian)
+                value = value_low | (value_high << 8)
+                
+                # For ping responses, the value is the firmware version
+                if light_byte == ord('S') and signal_byte == ord('S'):
+                    # This is a system response
+                    major_version = value_high  # High byte is major version
+                    minor_version = value_low   # Low byte is minor version
+                    firmware_version = f"{major_version}.{minor_version}"
+                    
+                    return {
+                        'status': 'ok',
+                        'type': 'system',
+                        'firmware_version': firmware_version,
+                        'raw_value': value
+                    }
+                else:
+                    # This is a regular data response
+                    return {
+                        'status': 'ok',
+                        'light': chr(light_byte),
+                        'signal': chr(signal_byte),
+                        'value': value
+                    }
             else:
-                return {'status': 'error'}
-        elif len(response_bytes) == 8:
-            # Data response
-            light_byte = response_bytes[1]
-            signal_byte = response_bytes[2]
-            value_low = response_bytes[3]
-            value_high = response_bytes[4]
-            checksum = response_bytes[5]
-            
-            # Check checksum
-            if checksum != (light_byte ^ signal_byte ^ value_low ^ value_high):
-                return {'error': 'Invalid checksum'}
-                
-            # Combine value bytes
-            value = value_low | (value_high << 8)
-            
-            # Parse response
-            return {
-                'light': chr(light_byte),
-                'signal': chr(signal_byte),
-                'value': value,
-                'status': 'ok'
-            }
+                # Simple OK response without data
+                return {'status': 'ok'}
+        elif response_bytes[1] == ord('N') or response_bytes[1] == ord(self.RESPONSE_ERROR):
+            # This is an error response
+            return {'status': 'error'}
         else:
-            return {'error': 'Invalid response length'}
+            # Unknown response type
+            return {'error': f'Unknown response type: {chr(response_bytes[1])}'}
     
     def send_command(self, cmd_type, light_id, signal_type, value):
         """
@@ -155,17 +173,17 @@ class HILProtocol:
         Returns:
             Dictionary with parsed response data
         """
+        if not self.serial:
+            raise ValueError("Serial helper is not set")
+            
+        if not self.serial.is_hil_connected():
+            raise ConnectionError("HIL serial port is not connected")
+        
         # Create command
         command = self.create_command(cmd_type, light_id, signal_type, value)
         
-        # Send command
-        self.serial.write(command)
-        
-        # Wait for response
-        time.sleep(0.1)
-        
-        # Read response
-        response = self.serial.read(8)
+        # Send command and get response
+        response = self.serial.send_hil_command(command)
         
         # Parse response
         return self.parse_response(response)
@@ -182,9 +200,19 @@ class HILProtocol:
         """
         response = self.send_command(self.CMD_GET, light_id, self.SIGNAL_PWM, 0)
         
-        if response.get('status') == 'ok':
-            return response.get('value')
+        if response.get('status') == 'ok' and 'value' in response:
+            # Scale value to percentage if needed (assuming raw value is 0-32767)
+            raw_value = response.get('value')
+            
+            # If value is already 0-100, return as is
+            if raw_value <= 100:
+                return raw_value
+            else:
+                # Scale from 0-32767 to 0-100
+                percentage = (raw_value / 32767) * 100
+                return round(percentage, 1)
         else:
+            print(f"Error getting PWM duty cycle: {response}")
             return None
     
     def set_current_simulation(self, light_id, current_ma):
@@ -206,7 +234,13 @@ class HILProtocol:
             print(f"Error converting arguments to integers: light_id={light_id}, current_ma={current_ma}")
             return False
             
-        response = self.send_command(self.CMD_SET, light_id, self.SIGNAL_CURRENT, current_ma)
+        # Scale current from 0-33000mA to 0-32767 value if needed
+        if current_ma > 32767:
+            scaled_value = min(32767, int((current_ma / 33000) * 32767))
+        else:
+            scaled_value = current_ma
+            
+        response = self.send_command(self.CMD_SET, light_id, self.SIGNAL_CURRENT, scaled_value)
         return response.get('status') == 'ok'
 
     def set_temperature_simulation(self, light_id, temperature_c):
@@ -228,13 +262,13 @@ class HILProtocol:
             print(f"Error converting arguments to numbers: light_id={light_id}, temperature_c={temperature_c}")
             return False
         
-        # Convert to tenths of a degree if needed
-        if temperature_c < 330:
-            temp_value = int(temperature_c * 10)
+        # Scale temperature from 0-330°C to 0-32767 value if needed
+        if temperature_c > 32767:
+            scaled_value = min(32767, int((temperature_c / 330) * 32767))
         else:
-            temp_value = int(temperature_c)
+            scaled_value = int(temperature_c)
                 
-        response = self.send_command(self.CMD_SET, light_id, self.SIGNAL_TEMPERATURE, temp_value)
+        response = self.send_command(self.CMD_SET, light_id, self.SIGNAL_TEMPERATURE, scaled_value)
         return response.get('status') == 'ok'
     
     def ping(self):
@@ -242,7 +276,17 @@ class HILProtocol:
         Send ping command to HIL
         
         Returns:
-            True if successful, False otherwise
+            Response dictionary including firmware version if successful
         """
-        response = self.send_command(self.CMD_PING, '1', self.SIGNAL_SYSTEM, 0)
-        return response.get('status') == 'ok'
+        response = self.send_command(self.CMD_PING, 'S', self.SIGNAL_SYSTEM, 0)
+        
+        if self.debug:
+            if response.get('status') == 'ok':
+                if 'firmware_version' in response:
+                    print(f"HIL Ping successful - Firmware version: {response['firmware_version']}")
+                else:
+                    print(f"HIL Ping successful")
+            else:
+                print(f"HIL Ping failed: {response}")
+                
+        return response
