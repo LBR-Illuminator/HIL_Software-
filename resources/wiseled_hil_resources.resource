@@ -50,10 +50,7 @@ Open HIL Connection
     [Arguments]    ${port}    ${baudrate}=115200    ${timeout}=5
     ${result}=    SerialHelper.Open HIL Connection    ${port}    ${baudrate}    ${timeout}
     
-    # First try passing the library name
-    HILProtocol.Set Serial Helper    SerialHelper
-    
-    # If that doesn't work, get the instance and pass it directly
+    # After opening the connection, immediately set the serial helper for HILProtocol
     ${helper}=    Get Library Instance    SerialHelper
     HILProtocol.Set Serial Helper    ${helper}
     
@@ -249,23 +246,43 @@ Clear Alarm
 Get PWM Duty Cycle
     [Documentation]    Get the PWM duty cycle for a specific light
     [Arguments]    ${light_id}
+    
+    # Ensure HIL protocol has serial helper
+    ${helper}=    Get Library Instance    SerialHelper
+    HILProtocol.Set Serial Helper    ${helper}
+    
     ${duty_cycle}=    HILProtocol.Get PWM Duty Cycle    ${light_id}
     RETURN    ${duty_cycle}
 
 Set Current Simulation
     [Documentation]    Set the simulated current for a specific light
     [Arguments]    ${light_id}    ${current_ma}
+    
+    # Ensure HIL protocol has serial helper
+    ${helper}=    Get Library Instance    SerialHelper
+    HILProtocol.Set Serial Helper    ${helper}
+    
     ${result}=    HILProtocol.Set Current Simulation    ${light_id}    ${current_ma}
     RETURN    ${result}
 
 Set Temperature Simulation
     [Documentation]    Set the simulated temperature for a specific light
     [Arguments]    ${light_id}    ${temperature_c}
+    
+    # Ensure HIL protocol has serial helper
+    ${helper}=    Get Library Instance    SerialHelper
+    HILProtocol.Set Serial Helper    ${helper}
+    
     ${result}=    HILProtocol.Set Temperature Simulation    ${light_id}    ${temperature_c}
     RETURN    ${result}
 
 Ping HIL
     [Documentation]    Send a ping command to the HIL hardware
+    
+    # Ensure HIL protocol has serial helper
+    ${helper}=    Get Library Instance    SerialHelper
+    HILProtocol.Set Serial Helper    ${helper}
+    
     ${response}=    HILProtocol.Ping
     RETURN    ${response}
 
@@ -300,3 +317,63 @@ Verify Value Within Tolerance
     END
     
     RETURN    ${within_tolerance}
+
+Check For Alarm
+    [Documentation]    Check if a specific alarm is active for a light
+    [Arguments]    ${light_id}    ${alarm_type}
+    
+    # Get current alarm status
+    ${alarm_status}=    Get Alarm Status
+    
+    # Check if there are active alarms in the response
+    ${has_alarms}=    Run Keyword And Return Status
+    ...    Dictionary Should Contain Key    ${alarm_status}[data]    active_alarms
+    
+    # If no alarms at all, return False immediately
+    IF    not ${has_alarms}
+        RETURN    ${FALSE}
+    END
+    
+    # Check if any active alarm matches the light_id and alarm_type
+    FOR    ${alarm}    IN    @{alarm_status}[data][active_alarms]
+        ${light_match}=    Evaluate    str(${alarm}['light']) == str(${light_id})
+        ${code_match}=    Evaluate    '${alarm}['code']' == '${alarm_type}'
+        
+        IF    ${light_match} and ${code_match}
+            RETURN    ${TRUE}
+        END
+    END
+    
+    # No matching alarm found
+    RETURN    ${FALSE}
+
+Verify PWM Output
+    [Documentation]    Verify that PWM output matches expected intensity
+    [Arguments]    ${light_id}    ${expected_intensity}
+    
+    # Ensure HIL protocol has serial helper
+    ${helper}=    Get Library Instance    SerialHelper
+    HILProtocol.Set Serial Helper    ${helper}
+    
+    # Get the actual PWM duty cycle
+    ${actual_duty}=    Get PWM Duty Cycle    ${light_id}
+    
+    # Make sure we have a valid reading
+    ${duty_valid}=    Run Keyword And Return Status    Evaluate    ${actual_duty} != None
+    
+    IF    not ${duty_valid}
+        Log    WARNING: Invalid PWM reading (None) - cannot verify    console=yes
+        RETURN    ${FALSE}
+    END
+    
+    # Calculate acceptable range
+    ${min_acceptable}=    Evaluate    ${expected_intensity} - ${TOLERANCE}
+    ${max_acceptable}=    Evaluate    ${expected_intensity} + ${TOLERANCE}
+    
+    # Verify within range
+    ${within_range}=    Evaluate    ${min_acceptable} <= ${actual_duty} <= ${max_acceptable}
+    
+    # Log the result
+    Log    Light ${light_id} - Expected: ${expected_intensity}%, Actual: ${actual_duty}%, Tolerance: ±${TOLERANCE}%    console=yes
+    
+    RETURN    ${within_range}

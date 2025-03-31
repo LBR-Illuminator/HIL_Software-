@@ -133,50 +133,47 @@ class ImprovedHILProtocol:
         if response_bytes[0] != self.START_MARKER or response_bytes[-1] != self.END_MARKER:
             return {'error': 'Invalid markers'}
         
-        # Check for OK response (cmd byte is 'O')
-        if response_bytes[1] == ord('O') or response_bytes[1] == ord(self.RESPONSE_OK):
-            # This is a success response
+        # Get response type (second byte)
+        response_type = response_bytes[1]
+        
+        # Handle different response types
+        if response_type == ord('O') or response_type == ord(self.RESPONSE_OK):
+            # This is a simple OK response
+            return {'status': 'ok'}
+            
+        elif response_type == ord('N') or response_type == ord(self.RESPONSE_ERROR):
+            # This is an error response
+            return {'status': 'error'}
+            
+        # Handle response with the same command type (G, S, P)
+        elif response_type == ord('G') or response_type == ord('S') or response_type == ord('P'):
             if len(response_bytes) == 8:
-                # Full response with data
-                light_byte = response_bytes[2]
-                signal_byte = response_bytes[3]
-                value_low = response_bytes[4]
-                value_high = response_bytes[5]
-                checksum = response_bytes[6]
+                light_byte = response_bytes[2]  # Light ID
+                signal_byte = response_bytes[3] # Signal type
+                value_low = response_bytes[4]   # Value low byte
+                value_high = response_bytes[5]  # Value high byte
                 
                 # Combine value bytes (little endian)
                 value = value_low | (value_high << 8)
                 
-                # For ping responses, the value is the firmware version
-                if light_byte == ord('S') and signal_byte == ord('S'):
-                    # This is a system response
-                    major_version = value_high  # High byte is major version
-                    minor_version = value_low   # Low byte is minor version
-                    firmware_version = f"{major_version}.{minor_version}"
-                    
-                    return {
-                        'status': 'ok',
-                        'type': 'system',
-                        'firmware_version': firmware_version,
-                        'raw_value': value
-                    }
-                else:
-                    # This is a regular data response
-                    return {
-                        'status': 'ok',
-                        'light': chr(light_byte),
-                        'signal': chr(signal_byte),
-                        'value': value
-                    }
-            else:
-                # Simple OK response without data
-                return {'status': 'ok'}
-        elif response_bytes[1] == ord('N') or response_bytes[1] == ord(self.RESPONSE_ERROR):
-            # This is an error response
-            return {'status': 'error'}
-        else:
-            # Unknown response type
-            return {'error': f'Unknown response type: {chr(response_bytes[1])}'}
+                # Scale value based on signal type
+                if chr(signal_byte) == self.SIGNAL_PWM:
+                    # PWM is 0-100%
+                    # For PWM, the response is typically 0-100 directly
+                    # If the raw value is higher, scale it
+                    if value > 100:
+                        scaled_value = (value / 32767) * 100
+                        value = round(scaled_value, 1)
+                
+                return {
+                    'status': 'ok',
+                    'light': chr(light_byte),
+                    'signal': chr(signal_byte),
+                    'value': value
+                }
+        
+        # Unknown response type
+        return {'error': f'Unknown response type: {chr(response_type)}'}
     
     def send_command(self, cmd_type, light_id, signal_type, value):
         """
@@ -219,16 +216,7 @@ class ImprovedHILProtocol:
         response = self.send_command(self.CMD_GET, light_id, self.SIGNAL_PWM, 0)
         
         if response.get('status') == 'ok' and 'value' in response:
-            # Scale value to percentage if needed (assuming raw value is 0-32767)
-            raw_value = response.get('value')
-            
-            # If value is already 0-100, return as is
-            if raw_value <= 100:
-                return raw_value
-            else:
-                # Scale from 0-32767 to 0-100
-                percentage = (raw_value / 32767) * 100
-                return round(percentage, 1)
+            return response.get('value')
         else:
             print(f"Error getting PWM duty cycle: {response}")
             return None
