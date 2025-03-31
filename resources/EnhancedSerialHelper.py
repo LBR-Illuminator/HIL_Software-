@@ -163,12 +163,12 @@ class EnhancedSerialHelper:
             # Restore original timeout
             self.serial.timeout = original_timeout
     
-    def send_illuminator_command(self, command_json, timeout=5.0):
+    def send_illuminator_command(self, command_dict, timeout=5.0):
         """
         Send a JSON command to the Illuminator and get the response
         
         Args:
-            command_json: JSON command string or dictionary
+            command_dict: JSON command string or dictionary
             timeout: Read timeout in seconds
             
         Returns:
@@ -177,11 +177,20 @@ class EnhancedSerialHelper:
         if not self.is_port_open():
             raise Exception("Serial port is not open")
         
+        # If data field is a string that looks like JSON, parse it
+        if isinstance(command_dict, dict) and 'data' in command_dict and isinstance(command_dict['data'], str):
+            if command_dict['data'].startswith('{') and command_dict['data'].endswith('}'):
+                try:
+                    command_dict['data'] = json.loads(command_dict['data'])
+                except json.JSONDecodeError:
+                    # Keep it as a string if it can't be parsed
+                    pass
+
         # Convert dict to string if needed
-        if isinstance(command_json, dict):
-            command_str = json.dumps(command_json)
+        if isinstance(command_dict, dict):
+            command_str = json.dumps(command_dict)
         else:
-            command_str = command_json
+            command_str = command_dict
         
         # Send the command
         self.write_data(command_str)

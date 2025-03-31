@@ -49,6 +49,7 @@ Open HIL Connection
     [Documentation]    Open a connection to the HIL hardware
     [Arguments]    ${port}    ${baudrate}=115200    ${timeout}=5
     ${result}=    SerialHelper.Open Serial Port    ${port}    ${baudrate}    ${timeout}    hil
+    HILProtocol.Set Serial Helper    SerialHelper
     RETURN    ${result}
 
 Close All Connections

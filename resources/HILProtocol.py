@@ -31,13 +31,17 @@ class HILProtocol:
     RESPONSE_OK = 'O'
     RESPONSE_ERROR = 'N'
 
-    def __init__(self, serial_helper):
+    def __init__(self, serial_helper=None):
         """
         Initialize with a SerialHelper instance
         
         Args:
             serial_helper: Instance of SerialHelper for serial communication
         """
+        self.serial = serial_helper
+
+    def set_serial_helper(self, serial_helper):
+        """Set the serial helper after initialization"""
         self.serial = serial_helper
     
     def create_command(self, cmd_type, light_id, signal_type, value):
@@ -194,9 +198,17 @@ class HILProtocol:
         Returns:
             True if successful, False otherwise
         """
+        # Ensure both arguments are integers
+        try:
+            light_id = int(light_id)
+            current_ma = int(current_ma)
+        except (ValueError, TypeError):
+            print(f"Error converting arguments to integers: light_id={light_id}, current_ma={current_ma}")
+            return False
+            
         response = self.send_command(self.CMD_SET, light_id, self.SIGNAL_CURRENT, current_ma)
         return response.get('status') == 'ok'
-    
+
     def set_temperature_simulation(self, light_id, temperature_c):
         """
         Set temperature simulation for a specific light
@@ -208,12 +220,20 @@ class HILProtocol:
         Returns:
             True if successful, False otherwise
         """
+        # Ensure light_id is an integer
+        try:
+            light_id = int(light_id)
+            temperature_c = float(temperature_c)
+        except (ValueError, TypeError):
+            print(f"Error converting arguments to numbers: light_id={light_id}, temperature_c={temperature_c}")
+            return False
+        
         # Convert to tenths of a degree if needed
         if temperature_c < 330:
             temp_value = int(temperature_c * 10)
         else:
             temp_value = int(temperature_c)
-            
+                
         response = self.send_command(self.CMD_SET, light_id, self.SIGNAL_TEMPERATURE, temp_value)
         return response.get('status') == 'ok'
     
