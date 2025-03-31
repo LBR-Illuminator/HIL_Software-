@@ -320,17 +320,27 @@ Test Temperature Sensor Reading
             ${sensor_data}=    Get Sensor Data    ${light_id}
             Should Be Equal    ${sensor_data}[data][status]    ok
             
-            # Check if sensors key exists
+            # Check for both 'sensors' and 'sensor' keys
             ${has_sensors}=    Run Keyword And Return Status
             ...    Dictionary Should Contain Key    ${sensor_data}[data]    sensors
             
-            Run Keyword If    not ${has_sensors}    Log    
-            ...    WARNING: Response does not contain sensors data: ${sensor_data}    level=WARN    console=yes
+            ${has_sensor}=    Run Keyword And Return Status
+            ...    Dictionary Should Contain Key    ${sensor_data}[data]    sensor
             
-            Run Keyword If    not ${has_sensors}    Continue For Loop
-
-            # Extract reported temperature
-            ${reported_temp}=    Set Variable    ${sensor_data}[data][sensors][0][temperature]
+            # Log either the sensor data structure found
+            Run Keyword If    not ${has_sensors} and not ${has_sensor}    Log    
+            ...    WARNING: Response does not contain sensors or sensor data: ${sensor_data}    level=WARN    console=yes
+            
+            # Skip if no sensor data at all
+            Run Keyword If    not ${has_sensors} and not ${has_sensor}    Continue For Loop
+            
+            # Extract reported temperature based on which key exists
+            ${reported_temp}=    Set Variable    0
+            IF    ${has_sensors}
+                ${reported_temp}=    Set Variable    ${sensor_data}[data][sensors][0][temperature]
+            ELSIF    ${has_sensor}
+                ${reported_temp}=    Set Variable    ${sensor_data}[data][sensor][temperature]
+            END
 
             # Verify temperature is within tolerance
             ${success}=    Verify Value Within Tolerance    ${temp}    ${reported_temp}    ${TOLERANCE}    Temperature (°C)
