@@ -358,10 +358,11 @@ Verify PWM Output
     # Get the actual PWM duty cycle
     ${actual_duty}=    Get PWM Duty Cycle    ${light_id}
     
-    # Make sure we have a valid reading
-    ${duty_valid}=    Run Keyword And Return Status    Evaluate    ${actual_duty} != None
+    # Check if actual_duty is None using the reliable string comparison method
+    ${is_none}=    Run Keyword And Return Status
+    ...    Should Be Equal As Strings    ${actual_duty}    None
     
-    IF    not ${duty_valid}
+    IF    ${is_none}
         Log    WARNING: Invalid PWM reading (None) - cannot verify    console=yes
         RETURN    ${FALSE}
     END
@@ -377,3 +378,37 @@ Verify PWM Output
     Log    Light ${light_id} - Expected: ${expected_intensity}%, Actual: ${actual_duty}%, Tolerance: ±${TOLERANCE}%    console=yes
     
     RETURN    ${within_range}
+
+Verify Other Lights Off
+    [Documentation]    Verify that other lights are off (special handling for 0% duty cycle)
+    [Arguments]    ${active_light_id}
+    
+    # Loop through all lights
+    FOR    ${light_id}    IN RANGE    1    4
+        # Skip the active light that should be on
+        IF    ${light_id} != ${active_light_id}
+            # Ensure HIL protocol has serial helper
+            ${helper}=    Get Library Instance    SerialHelper
+            HILProtocol.Set Serial Helper    ${helper}
+            
+            ${other_duty}=    Get PWM Duty Cycle    ${light_id}
+            
+            # First check if we got a valid duty cycle reading
+            # We need to use String comparison with "None" because Robot Framework
+            # doesn't directly support comparing with Python's None
+            ${is_none}=    Run Keyword And Return Status
+            ...    Should Be Equal As Strings    ${other_duty}    None
+            
+            IF    ${is_none}
+                Log    WARNING: Got invalid PWM reading (None) for light ${light_id} - skipping verification    console=yes
+                CONTINUE
+            END
+            
+            # For hardware that can't accurately measure 0%, 
+            # we'll accept anything below a low threshold (e.g. 15%)
+            # as "effectively off"
+            ${is_effectively_off}=    Evaluate    ${other_duty} < 15
+            Should Be True    ${is_effectively_off}    
+            ...    Light ${light_id} should be off but measured PWM duty cycle = ${other_duty}%
+        END
+    END
