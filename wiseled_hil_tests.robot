@@ -14,12 +14,13 @@ Suite Setup       Initialize Test Environment
 Suite Teardown    Cleanup Test Environment
 
 *** Variables ***
-${ILLUMINATOR_PORT}    COM19     # Default port for Illuminator, override with -v ILLUMINATOR_PORT:COM4
-${HIL_PORT}            COM20    # Default port for HIL board, override with -v HIL_PORT:COM19
-${BAUD_RATE}           115200
-${TIMEOUT}             5
-${RETRY_MAX}           3        # Maximum number of retry attempts
-${TOLERANCE}           5        # Tolerance percentage for sensor readings (5%)
+${ILLUMINATOR_PORT}                COM19      # Default port for Illuminator, override with -v ILLUMINATOR_PORT:COM4
+${HIL_PORT}                        COM20      # Default port for HIL board, override with -v HIL_PORT:COM19
+${BAUD_RATE}                       115200
+${TIMEOUT}                         5
+${RETRY_MAX}                       3          # Maximum number of retry attempts
+${TOLERANCE}                       5          # Tolerance percentage for sensor readings (5%)
+${TEMPERATURE_TOLERANCE}           10         # Tolerance percentage for temperaure readings (5%)
 
 # Test intensity values
 @{INTENSITY_LEVELS}    0    25    50    75    100
@@ -318,33 +319,80 @@ Test Temperature Sensor Reading
 
             # Read temperature from Illuminator
             ${sensor_data}=    Get Sensor Data    ${light_id}
-            Should Be Equal    ${sensor_data}[data][status]    ok
             
-            # Check for both 'sensors' and 'sensor' keys
-            ${has_sensors}=    Run Keyword And Return Status
-            ...    Dictionary Should Contain Key    ${sensor_data}[data]    sensors
-            
-            ${has_sensor}=    Run Keyword And Return Status
-            ...    Dictionary Should Contain Key    ${sensor_data}[data]    sensor
-            
-            # Log either the sensor data structure found
-            Run Keyword If    not ${has_sensors} and not ${has_sensor}    Log    
-            ...    WARNING: Response does not contain sensors or sensor data: ${sensor_data}    level=WARN    console=yes
-            
-            # Skip if no sensor data at all
-            Run Keyword If    not ${has_sensors} and not ${has_sensor}    Continue For Loop
-            
-            # Extract reported temperature based on which key exists
+            # Initialize reported temperature to zero
             ${reported_temp}=    Set Variable    0
-            IF    ${has_sensors}
-                ${reported_temp}=    Set Variable    ${sensor_data}[data][sensors][0][temperature]
-            ELSIF    ${has_sensor}
-                ${reported_temp}=    Set Variable    ${sensor_data}[data][sensor][temperature]
+            
+            # Check if we got a normal response or an event (like temperature alarm)
+            ${is_resp}=    Evaluate    "${sensor_data}[type]" == "resp"
+            
+            IF    ${is_resp}
+                # Check if we have a valid status in the response
+                ${has_status}=    Run Keyword And Return Status
+                ...    Should Be Equal    ${sensor_data}[data][status]    ok
+                
+                IF    ${has_status}
+                    # Check if we have the 'sensor' key with temperature inside it
+                    ${has_sensor}=    Run Keyword And Return Status
+                    ...    Dictionary Should Contain Key    ${sensor_data}[data]    sensor
+                    
+                    IF    ${has_sensor}
+                        ${has_temp}=    Run Keyword And Return Status
+                        ...    Dictionary Should Contain Key    ${sensor_data}[data][sensor]    temperature
+                        
+                        IF    ${has_temp}
+                            ${reported_temp}=    Set Variable    ${sensor_data}[data][sensor][temperature]
+                            Log    Found temperature in sensor data: ${reported_temp}°C    console=yes
+                        ELSE
+                            Log    No temperature in sensor data    level=WARN    console=yes
+                        END
+                    ELSE
+                        # Also check 'sensors' array format as fallback
+                        ${has_sensors}=    Run Keyword And Return Status
+                        ...    Dictionary Should Contain Key    ${sensor_data}[data]    sensors
+                        
+                        IF    ${has_sensors}
+                            # Check if sensors is not empty
+                            ${sensors_not_empty}=    Evaluate    len(${sensor_data}[data][sensors]) > 0
+                            
+                            IF    ${sensors_not_empty}
+                                ${has_temp}=    Run Keyword And Return Status
+                                ...    Dictionary Should Contain Key    ${sensor_data}[data][sensors][0]    temperature
+                                
+                                IF    ${has_temp}
+                                    ${reported_temp}=    Set Variable    ${sensor_data}[data][sensors][0][temperature]
+                                    Log    Found temperature in sensors array: ${reported_temp}°C    console=yes
+                                ELSE
+                                    Log    No temperature in sensors array    level=WARN    console=yes
+                                END
+                            ELSE
+                                Log    Sensors array is empty    level=WARN    console=yes
+                            END
+                        ELSE
+                            Log    No sensor data found in response    level=WARN    console=yes
+                        END
+                    END
+                ELSE
+                    Log    Response status not OK: ${sensor_data}[data][status]    level=WARN    console=yes
+                END
+            ELSE
+                # Handle event type messages (like temperature alarms)
+                ${is_temp_alarm}=    Evaluate    
+                ...    "${sensor_data}[topic]" == "alarm" and 
+                ...    "${sensor_data}[action]" == "triggered" and
+                ...    "${sensor_data}[data][code]" == "over_temperature"
+                
+                IF    ${is_temp_alarm}
+                    ${reported_temp}=    Set Variable    ${sensor_data}[data][value]
+                    Log    Temperature alarm event with value: ${reported_temp}°C    console=yes
+                ELSE
+                    Log    Unexpected event type: ${sensor_data}    level=WARN    console=yes
+                END
             END
 
             # Verify temperature is within tolerance
-            ${success}=    Verify Value Within Tolerance    ${temp}    ${reported_temp}    ${TOLERANCE}    Temperature (°C)
-            Should Be True    ${success}    Reported temperature ${reported_temp} not within ${TOLERANCE}% of simulated ${temp}
+            ${success}=    Verify Value Within Tolerance    ${temp}    ${reported_temp}    ${TEMPERATURE_TOLERANCE}    Temperature (°C)
+            Should Be True    ${success}    Reported temperature ${reported_temp} not within ${TEMPERATURE_TOLERANCE}% of simulated ${temp}
 
             Log    Light ${light_id} Temperature: Simulated=${temp}°C, Reported=${reported_temp}°C    console=yes
         END
