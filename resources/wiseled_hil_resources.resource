@@ -49,7 +49,14 @@ Open HIL Connection
     [Documentation]    Open a dedicated connection to the HIL hardware
     [Arguments]    ${port}    ${baudrate}=115200    ${timeout}=5
     ${result}=    SerialHelper.Open HIL Connection    ${port}    ${baudrate}    ${timeout}
-    HILProtocol.Set Serial Helper    ${SerialHelper}
+    
+    # First try passing the library name
+    HILProtocol.Set Serial Helper    SerialHelper
+    
+    # If that doesn't work, get the instance and pass it directly
+    ${helper}=    Get Library Instance    SerialHelper
+    HILProtocol.Set Serial Helper    ${helper}
+    
     RETURN    ${result}
 
 Is Illuminator Connected
@@ -278,7 +285,18 @@ Wait For Stable Reading
 
 Verify Value Within Tolerance
     [Documentation]    Verify a value is within tolerance of expected
-    [Arguments]    ${expected}    ${actual}    ${tolerance_percent}=${TOLERANCE_PERCENT}    ${name}=Value
+    [Arguments]    ${expected}    ${actual}    ${tolerance_percent}=${TOLERANCE}    ${name}=Value
     
     ${min_acceptable}=    Evaluate    ${expected} * (1 - ${tolerance_percent}/100)
-    ${max_acceptable}=    Evaluate    ${expected} * (1 + ${tolerance_percent}/100
+    ${max_acceptable}=    Evaluate    ${expected} * (1 + ${tolerance_percent}/100)
+    
+    ${within_tolerance}=    Evaluate    ${min_acceptable} <= ${actual} <= ${max_acceptable}
+    
+    # Log the result
+    IF    ${within_tolerance}
+        Log    ${name} within tolerance: Expected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%    console=yes
+    ELSE
+        Log    ${name} outside tolerance: Expected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%    level=WARN    console=yes
+    END
+    
+    RETURN    ${within_tolerance}

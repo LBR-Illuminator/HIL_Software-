@@ -42,9 +42,27 @@ class ImprovedHILProtocol:
         self.serial = serial_helper
         self.debug = True
 
-    def set_serial_helper(self, serial_helper):
-        """Set the serial helper after initialization"""
-        self.serial = serial_helper
+    def set_serial_helper(self, serial_helper_name):
+        """Set the serial helper by name"""
+        # Try to get the library instance from Robot Framework
+        try:
+            from robot.libraries.BuiltIn import BuiltIn
+            self.serial = BuiltIn().get_library_instance(serial_helper_name)
+            
+            # Verify the helper was set correctly
+            if self.serial and hasattr(self.serial, 'is_hil_connected'):
+                print(f"Successfully set serial helper: {self.serial}")
+            else:
+                print(f"Warning: Serial helper doesn't have expected methods: {self.serial}")
+        except Exception as e:
+            # Fall back to direct reference if BuiltIn approach fails
+            print(f"Error using Robot BuiltIn: {e}")
+            print(f"Trying direct approach with name: {serial_helper_name}")
+            
+            # In this case, assume the actual helper object was passed
+            if isinstance(serial_helper_name, object) and hasattr(serial_helper_name, 'is_hil_connected'):
+                self.serial = serial_helper_name
+                print(f"Successfully set serial helper directly: {self.serial}")
     
     def create_command(self, cmd_type, light_id, signal_type, value):
         """

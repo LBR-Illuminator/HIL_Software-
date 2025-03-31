@@ -489,6 +489,102 @@ Cleanup Test Environment
     # Close serial ports
     Close All Connections
 
+Setup Safe Conditions
+    [Documentation]    Set the system to a safe state
+    Log    Setting up safe conditions    console=yes
+    
+    # Turn off all lights
+    ${command}=    Create Dictionary
+    ...    type=cmd
+    ...    id=safe-all
+    ...    topic=light
+    ...    action=set_all
+    ...    data={"intensities": [0, 0, 0]}
+    
+    ${resp}=    Send Illuminator Command    ${command}
+    Log    Set all lights to 0: ${resp}[data][status]    console=yes
+    
+    # Try to reset current and temp simulation (catch errors)
+    TRY
+        FOR    ${light_id}    IN RANGE    1    4
+            Set Current Simulation    ${light_id}    1000
+            Set Temperature Simulation    ${light_id}    30
+        END
+        
+        # Clear any active alarms
+        FOR    ${light_id}    IN RANGE    1    4
+            Clear Alarm    ${light_id}
+        END
+    EXCEPT    AS    ${error}
+        Log    Error setting hardware simulation: ${error}    console=yes
+    END
+
+Verify PWM Output
+    [Documentation]    Verify that PWM output matches expected intensity
+    [Arguments]    ${light_id}    ${expected_intensity}
+    
+    # Get the actual PWM duty cycle
+    ${actual_duty}=    Get PWM Duty Cycle    ${light_id}
+    
+    # Calculate acceptable range
+    ${min_acceptable}=    Evaluate    ${expected_intensity} - ${TOLERANCE}
+    ${max_acceptable}=    Evaluate    ${expected_intensity} + ${TOLERANCE}
+    
+    # Verify within range
+    ${within_range}=    Evaluate    ${min_acceptable} <= ${actual_duty} <= ${max_acceptable}
+    
+    # Log the result
+    Log    Light ${light_id} - Expected: ${expected_intensity}%, Actual: ${actual_duty}%, Tolerance: ±${TOLERANCE}%    console=yes
+    
+    RETURN    ${within_range}
+
+Check For Alarm
+    [Documentation]    Check if a specific alarm is active for a light
+    [Arguments]    ${light_id}    ${alarm_type}
+    
+    # Get current alarm status
+    ${alarm_status}=    Get Alarm Status
+    
+    # Check if there are active alarms in the response
+    ${has_alarms}=    Run Keyword And Return Status
+    ...    Dictionary Should Contain Key    ${alarm_status}[data]    active_alarms
+    
+    # If no alarms at all, return False immediately
+    IF    not ${has_alarms}
+        RETURN    ${FALSE}
+    END
+    
+    # Check if any active alarm matches the light_id and alarm_type
+    FOR    ${alarm}    IN    @{alarm_status}[data][active_alarms]
+        ${light_match}=    Evaluate    str(${alarm}['light']) == str(${light_id})
+        ${code_match}=    Evaluate    '${alarm}['code']' == '${alarm_type}'
+        
+        IF    ${light_match} and ${code_match}
+            RETURN    ${TRUE}
+        END
+    END
+    
+    # No matching alarm found
+    RETURN    ${FALSE}
+
+Verify Value Within Tolerance
+    [Documentation]    Verify a value is within tolerance of expected
+    [Arguments]    ${expected}    ${actual}    ${tolerance_percent}=${TOLERANCE}    ${name}=Value
+    
+    ${min_acceptable}=    Evaluate    ${expected} * (1 - ${tolerance_percent}/100)
+    ${max_acceptable}=    Evaluate    ${expected} * (1 + ${tolerance_percent}/100)
+    
+    ${within_tolerance}=    Evaluate    ${min_acceptable} <= ${actual} <= ${max_acceptable}
+    
+    # Log the result
+    IF    ${within_tolerance}
+        Log    ${name} within tolerance: Expected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%    console=yes
+    ELSE
+        Log    ${name} outside tolerance: Expected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%    level=WARN    console=yes
+    END
+    
+    RETURN    ${within_tolerance}
+
 Is Illuminator Connected
     [Documentation]    Check if Illuminator is connected
     RETURN    ${ILLUMINATOR_CONNECTED}
