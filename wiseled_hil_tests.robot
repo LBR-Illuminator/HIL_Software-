@@ -249,8 +249,7 @@ Test Current Sensor Reading
             # Set simulated current on HIL
             ${set_result}=    Set Current Simulation    ${light_id}    ${current}
             
-            # Even if simulation fails, we can continue with the test
-            # The actual test happens when we read sensor data from Illuminator
+            # Log the set result
             Run Keyword If    not ${set_result}    
             ...    Log    Warning: Failed to set current simulation to ${current}mA. Test continuing...    console=yes
 
@@ -260,23 +259,43 @@ Test Current Sensor Reading
             ${sensor_data}=    Get Sensor Data    ${light_id}
             Should Be Equal    ${sensor_data}[data][status]    ok
             
-            # Check if sensors key exists
-            ${has_sensors}=    Run Keyword And Return Status
-            ...    Dictionary Should Contain Key    ${sensor_data}[data]    sensors
+            # Extract reported current with explicit error handling
+            ${reported_current}=    Set Variable    ${EMPTY}
             
-            Run Keyword If    not ${has_sensors}    Log    
-            ...    WARNING: Response does not contain sensors data: ${sensor_data}    level=WARN    console=yes
+            # Try extracting from sensor key first
+            ${has_sensor_key}=    Run Keyword And Return Status    
+            ...    Dictionary Should Contain Key    ${sensor_data}[data]    sensor
             
-            Run Keyword If    not ${has_sensors}    Continue For Loop
-
-            # Extract reported current
-            ${reported_current}=    Set Variable    ${sensor_data}[data][sensors][0][current]
-
+            # If sensor key exists, extract current and remove any trailing }
+            ${raw_current}=    Run Keyword If    ${has_sensor_key}    
+            ...    Set Variable    ${sensor_data}[data][sensor][current]}
+            ...    ELSE    Set Variable    ${EMPTY}
+            
+            # Remove trailing } if present
+            ${current_str}=    Remove String    ${raw_current}    }
+            
+            # Convert to float
+            ${reported_current}=    Evaluate    float('${current_str}')
+            
+            # Log diagnostic information
+            Log    Current data for Light ${light_id}: ${reported_current}    console=yes
+            Log    Full sensor data: ${sensor_data}    console=yes
+            
             # Verify current is within tolerance
-            ${success}=    Verify Value Within Tolerance    ${current}    ${reported_current}    ${TOLERANCE}    Current (mA)
-            Should Be True    ${success}    Reported current ${reported_current} not within ${TOLERANCE}% of simulated ${current}
+            ${min_acceptable}=    Evaluate    ${current} * 0.95
+            ${max_acceptable}=    Evaluate    ${current} * 1.05
+            
+            # Explicit numeric comparison
+            ${within_range}=    Evaluate    ${min_acceptable} <= ${reported_current} <= ${max_acceptable}
+            
+            # Log detailed tolerance check
+            Log    Simulated: ${current}mA, Reported: ${reported_current}mA, Min: ${min_acceptable}, Max: ${max_acceptable}    console=yes
+            
+            # Assertion with clear error message
+            Run Keyword If    not ${within_range}    
+            ...    Fail    Reported current ${reported_current}mA is outside acceptable range of ${current}mA (±5%)
 
-            Log    Light ${light_id} Current: Simulated=${current}mA, Reported=${reported_current}mA    console=yes
+            Log    ✓ Light ${light_id} Current: Simulated=${current}mA, Reported=${reported_current}mA    console=yes
         END
     END
 
