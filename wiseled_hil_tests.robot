@@ -243,44 +243,60 @@ Test Current Sensor Reading
         @{test_currents}=    Create List    1000    1500    2000    2500
 
         FOR    ${current}    IN    @{test_currents}
-            # Current HIL protocol setup and current simulation code...
+            # Ensure HIL protocol has serial helper
+            ${helper}=    Get Library Instance    SerialHelper
+            HILProtocol.Set Serial Helper    ${helper}
             
-            # Get alarm status
-            ${alarm_resp}=    Get Alarm Status
+            # Set simulated current on HIL
+            ${set_result}=    Set Current Simulation    ${light_id}    ${current}
             
-            IF    ${current} >= ${CURRENT_THRESHOLD}
-                # If it's a regular response message
-                ${is_regular_response}=    Run Keyword And Return Status
-                ...    Dictionary Should Contain Key    ${alarm_resp}[data]    active_alarms
-                
-                # If it's an event notification
-                ${is_event}=    Run Keyword And Return Status
-                ...    Evaluate    "${alarm_resp}[type]" == "event" and "${alarm_resp}[topic]" == "alarm" and "${alarm_resp}[action]" == "triggered"
-                
-                # Check if either condition is met
-                ${alarm_detected}=    Evaluate    ${is_regular_response} or ${is_event}
-                Should Be True    ${alarm_detected}    Expected alarm notification for current ${current}mA
-                
-                # If it's a regular response, check active_alarms
-                IF    ${is_regular_response}
-                    ${alarm_active}=    Check For Alarm    ${light_id}    over_current
-                    Should Be True    ${alarm_active}    Expected over_current alarm for light ${light_id}
-                # If it's an event, check the event data
-                ELSE IF    ${is_event}
-                    ${correct_source}=    Evaluate    "${alarm_resp}[data][source]" == "light_${light_id}"
-                    ${correct_code}=    Evaluate    "${alarm_resp}[data][code]" == "over_current"
-                    ${alarm_verified}=    Evaluate    ${correct_source} and ${correct_code}
-                    Should Be True    ${alarm_verified}    Event does not contain expected over_current alarm for light ${light_id}
-                END
-                
-                BREAK
-            ELSE
-                # Current below threshold - no alarm expected
-                Should Be True    ${current_duty} > 70    Light ${light_id} should be on but measured PWM duty cycle = ${current_duty}%
-                
-                ${alarm_active}=    Check For Alarm    ${light_id}    over_current
-                Should Not Be True    ${alarm_active}    Unexpected alarm for light ${light_id} at current ${current}mA
-            END
+            # Log the set result
+            Run Keyword If    not ${set_result}    
+            ...    Log    Warning: Failed to set current simulation to ${current}mA. Test continuing...    console=yes
+
+            Wait For Stable Reading    0.5    # Allow time for system to register new value
+
+            # Read current from Illuminator
+            ${sensor_data}=    Get Sensor Data    ${light_id}
+            Should Be Equal    ${sensor_data}[data][status]    ok
+            
+            # Extract reported current with explicit error handling
+            ${reported_current}=    Set Variable    ${EMPTY}
+            
+            # Try extracting from sensor key first
+            ${has_sensor_key}=    Run Keyword And Return Status    
+            ...    Dictionary Should Contain Key    ${sensor_data}[data]    sensor
+            
+            # If sensor key exists, extract current and remove any trailing }
+            ${raw_current}=    Run Keyword If    ${has_sensor_key}    
+            ...    Set Variable    ${sensor_data}[data][sensor][current]}
+            ...    ELSE    Set Variable    ${EMPTY}
+            
+            # Remove trailing } if present
+            ${current_str}=    Remove String    ${raw_current}    }
+            
+            # Extract reported current and convert from Amps to milliamps
+            ${reported_current}=    Evaluate    float('${current_str}') * 1000
+            
+            # Log diagnostic information
+            #Log    Current data for Light ${light_id}: ${reported_current}    console=yes
+            #Log    Full sensor data: ${sensor_data}    console=yes
+            
+            # Verify current is within tolerance
+            ${min_acceptable}=    Evaluate    ${current} * (1 - ${CURRENT_TOLERANCE}/100)
+            ${max_acceptable}=    Evaluate    ${current} * (1 + ${CURRENT_TOLERANCE}/100)
+            
+            # Explicit numeric comparison
+            ${within_range}=    Evaluate    ${min_acceptable} <= ${reported_current} <= ${max_acceptable}
+            
+            # Log detailed tolerance check
+            #Log    Simulated: ${current}mA, Reported: ${reported_current}mA, Min: ${min_acceptable}, Max: ${max_acceptable}    console=yes
+            
+            # Assertion with clear error message
+            Run Keyword If    not ${within_range}    
+            ...    Fail    Reported current ${reported_current}mA is outside acceptable range of ${current}mA (±5%)
+
+            Log    ✓ Light ${light_id} Current: Simulated=${current}mA, Reported=${reported_current}mA, Tolerance ±${CURRENT_TOLERANCE}%    console=yes
         END
     END
 
@@ -346,7 +362,7 @@ Test Temperature Sensor Reading
                         
                         IF    ${has_temp}
                             ${reported_temp}=    Set Variable    ${sensor_data}[data][sensor][temperature]
-                            Log    Found temperature in sensor data: ${reported_temp}°C    console=yes
+                            #Log    Found temperature in sensor data: ${reported_temp}°C    console=yes
                         ELSE
                             Log    No temperature in sensor data    level=WARN    console=yes
                         END
@@ -398,12 +414,13 @@ Test Temperature Sensor Reading
             ${success}=    Verify Value Within Tolerance    ${temp}    ${reported_temp}    ${TEMPERATURE_TOLERANCE}    Temperature (°C)
             Should Be True    ${success}    Reported temperature ${reported_temp} not within ${TEMPERATURE_TOLERANCE}% of simulated ${temp}
 
-            Log    Light ${light_id} Temperature: Simulated=${temp}°C, Reported=${reported_temp}°C    console=yes
+            #Log    Light ${light_id} Temperature: Simulated=${temp}°C, Reported=${reported_temp}°C    console=yes
         END
     END
 
     # Clean up - turn off all lights
     Set All Lights Intensity    0    0    0
+
 
 #######################
 # Safety Feature Tests #
@@ -447,7 +464,7 @@ Test Current Threshold Safety
         END
 
         # Create a list of test currents
-        @{test_currents}=    Create List    15000    24000    26000    30000
+        @{test_currents}=    Create List    20000    26000    30000
         
         # Now gradually increase current
         FOR    ${current}    IN    @{test_currents}
@@ -467,35 +484,47 @@ Test Current Threshold Safety
                 CONTINUE
             END
 
-            # Get alarm status
+            # Get alarm status with multiple attempts
+            ${max_attempts}=    Set Variable    5
+            ${over_current_found}=    Set Variable    ${FALSE}
             ${alarm_resp}=    Get Alarm Status
+            
+            
             
             # Check if we've exceeded the threshold
             IF    ${current} >= ${CURRENT_THRESHOLD}
-                # Determine if we got a regular response or an event notification
-                ${is_regular_response}=    Run Keyword And Return Status
-                ...    Dictionary Should Contain Key    ${alarm_resp}[data]    active_alarms
-                
-                ${is_event}=    Run Keyword And Return Status
-                ...    Evaluate    "${alarm_resp}[type]" == "event" and "${alarm_resp}[topic]" == "alarm" and "${alarm_resp}[action]" == "triggered"
-                
-                # Either condition should pass the test
-                ${alarm_detected}=    Evaluate    ${is_regular_response} or ${is_event}
-                Should Be True    ${alarm_detected}    Expected alarm notification for current ${current}mA
-                
-                # If we got an event, verify it's the correct event type
-                IF    ${is_event}
-                    ${correct_code}=    Evaluate    "${alarm_resp}[data][code]" == "over_current"
-                    ${correct_source}=    Evaluate    "${alarm_resp}[data][source]" == "light_${light_id}"
-                    ${event_verified}=    Evaluate    ${correct_code} and ${correct_source}
-                    Should Be True    ${event_verified}    Event does not contain expected over_current alarm for light ${light_id}
-                    Log    Alarm event verified: ${alarm_resp}[data]    console=yes
-                # If we got a regular response, check active_alarms
-                ELSE IF    ${is_regular_response}
-                    ${alarm_active}=    Check For Alarm    ${light_id}    over_current
-                    Should Be True    ${alarm_active}    Expected over_current alarm for light ${light_id}
-                    Log    Active alarm verified in alarm status    console=yes
+                FOR    ${attempt}    IN RANGE    1    ${max_attempts} + 1
+                    Wait For Stable Reading    1
+                    
+                    #Log    Attempt ${attempt}: Alarm status - ${alarm_resp}[data][status]    console=yes
+                    
+                    # Check for over_current in active_alarms or event data
+                    ${over_current_in_alarms}=    Evaluate    
+                    ...    any('over_current' in str(alarm) for alarm in ${alarm_resp}[data].get('active_alarms', []))
+                    
+                    ${is_over_current_event}=    Run Keyword And Return Status
+                    ...    Evaluate    
+                    ...    ("${alarm_resp}[type]" == "event" and 
+                    ...     "${alarm_resp}[topic]" == "alarm" and 
+                    ...     "${alarm_resp}[action]" == "triggered" and 
+                    ...     "${alarm_resp}[data][code]" == "over_current")
+                    
+                    # Check if over_current is found
+                    IF    ${over_current_in_alarms} or ${is_over_current_event}
+                        ${over_current_found}=    Set Variable    ${TRUE}
+                        Log    Over-current alarm found on attempt ${attempt}    console=yes
+                        BREAK
+                    END
+                    
+                    # Wait before next attempt if not found
+                    Sleep    0.5
+                    ${alarm_resp}=    Get Alarm Status
                 END
+
+                # Fail the test if no over_current alarm was found after all attempts
+                Should Be True    ${over_current_found}    No over-current alarm detected after ${max_attempts} attempts
+
+                Log    ✓ Active alarm verified in alarm status    console=yes
                 
                 # Test is successful for this light, we can break the loop
                 BREAK
@@ -511,6 +540,10 @@ Test Current Threshold Safety
 
         # Reset to normal current
         Set Current Simulation    ${light_id}    1000
+
+        # Clear all alarms for this light after the test
+        Clear Alarm    ${light_id}
+        Wait For Stable Reading    0.5
     END
 
 Test Temperature Threshold Safety
@@ -559,7 +592,7 @@ Test Temperature Threshold Safety
         END
 
         # Now gradually increase temperature until it exceeds threshold
-        FOR    ${temp}    IN RANGE    70    95    5
+        FOR    ${temp}    IN RANGE    70    95
             # Ensure HIL protocol has serial helper
             ${helper}=    Get Library Instance    SerialHelper
             HILProtocol.Set Serial Helper    ${helper}

@@ -311,9 +311,9 @@ Verify Value Within Tolerance
     
     # Log the result
     IF    ${within_tolerance}
-        Log    ${name} within tolerance: Expected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%    console=yes
+        Log    ✓ ${name} within tolerance: Expected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%      console=yes
     ELSE
-        Log    ${name} outside tolerance: Expected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%    level=WARN    console=yes
+        Log    - ${name} outside tolerance: Expected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%    level=WARN    console=yes
     END
     
     RETURN    ${within_tolerance}
@@ -336,8 +336,9 @@ Check For Alarm
     
     # Check if any active alarm matches the light_id and alarm_type
     FOR    ${alarm}    IN    @{alarm_status}[data][active_alarms]
-        ${light_match}=    Evaluate    str(${alarm}['light']) == str(${light_id})
-        ${code_match}=    Evaluate    '${alarm}['code']' == '${alarm_type}'
+        # Use dictionary access that doesn't rely on key existence assumption
+        ${light_match}=    Evaluate    str($alarm.get('light', 0)) == str(${light_id})
+        ${code_match}=    Evaluate    $alarm.get('code', '') == '${alarm_type}'
         
         IF    ${light_match} and ${code_match}
             RETURN    ${TRUE}
@@ -375,7 +376,7 @@ Verify PWM Output
     ${within_range}=    Evaluate    ${min_acceptable} <= ${actual_duty} <= ${max_acceptable}
     
     # Log the result
-    Log    Light ${light_id} - Expected: ${expected_intensity}%, Actual: ${actual_duty}%, Tolerance: ±${TOLERANCE}%    console=yes
+    Log    ✓ Light ${light_id} - Expected: ${expected_intensity}%, Actual: ${actual_duty}%, Tolerance: ±${TOLERANCE}%    console=yes
     
     RETURN    ${within_range}
 
