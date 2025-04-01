@@ -184,7 +184,13 @@ class ImprovedSerialHelper:
             if timeout is not None:
                 self.illuminator_serial.timeout = float(timeout)
             
-            response_str = self.illuminator_serial.readline().decode('utf-8').strip()
+            try:
+                response_raw = self.illuminator_serial.readline()
+                response_str = response_raw.decode('utf-8', errors='replace').strip()
+            except UnicodeDecodeError:
+                self._log(f"Warning: Received binary data that can't be decoded as UTF-8")
+                # Option 1: Return the raw bytes
+                return {"error": "Binary data received", "raw_data": response_raw}
             self._log(f"ILLUMINATOR RX: {response_str}")
             
             # Parse and return JSON
