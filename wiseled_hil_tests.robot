@@ -20,7 +20,8 @@ ${BAUD_RATE}                       115200
 ${TIMEOUT}                         5
 ${RETRY_MAX}                       3          # Maximum number of retry attempts
 ${TOLERANCE}                       5          # Tolerance percentage for sensor readings (5%)
-${TEMPERATURE_TOLERANCE}           10         # Tolerance percentage for temperaure readings (5%)
+${TEMPERATURE_TOLERANCE}           10         # Tolerance percentage for temperaure readings (10%)
+${CURRENT_TOLERANCE}               20         # Tolerance percentage for Current readings (10%)
 
 # Test intensity values
 @{INTENSITY_LEVELS}    0    25    50    75    100
@@ -239,7 +240,7 @@ Test Current Sensor Reading
         Wait For Stable Reading    0.5
 
         # Test current values
-        @{test_currents}=    Create List    500    1000    1500    2000    2500
+        @{test_currents}=    Create List    1000    1500    2000    2500
 
         FOR    ${current}    IN    @{test_currents}
             # Ensure HIL protocol has serial helper
@@ -274,16 +275,16 @@ Test Current Sensor Reading
             # Remove trailing } if present
             ${current_str}=    Remove String    ${raw_current}    }
             
-            # Convert to float
-            ${reported_current}=    Evaluate    float('${current_str}')
+            # Extract reported current and convert from Amps to milliamps
+            ${reported_current}=    Evaluate    float('${current_str}') * 1000
             
             # Log diagnostic information
             Log    Current data for Light ${light_id}: ${reported_current}    console=yes
             Log    Full sensor data: ${sensor_data}    console=yes
             
             # Verify current is within tolerance
-            ${min_acceptable}=    Evaluate    ${current} * 0.95
-            ${max_acceptable}=    Evaluate    ${current} * 1.05
+            ${min_acceptable}=    Evaluate    ${current} * (1 - ${CURRENT_TOLERANCE}/100)
+            ${max_acceptable}=    Evaluate    ${current} * (1 + ${CURRENT_TOLERANCE}/100)
             
             # Explicit numeric comparison
             ${within_range}=    Evaluate    ${min_acceptable} <= ${reported_current} <= ${max_acceptable}

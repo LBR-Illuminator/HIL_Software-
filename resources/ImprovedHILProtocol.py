@@ -240,9 +240,8 @@ class ImprovedHILProtocol:
             print(f"Error converting arguments to integers: light_id={light_id}, current_ma={current_ma}")
             return False
         
-        # Scale using the firmware's scaling method:
-        # (current_ma * 1023) / 330
-        scaled_value = min(1023, int((current_ma * 1023) / 330))
+        # Scale current_ma by 100 to match hardware expectations (1000mA = 10)
+        scaled_value = int(current_ma / 100)
         
         response = self.send_command(self.CMD_SET, light_id, self.SIGNAL_CURRENT, scaled_value)
         return response.get('status') == 'ok'
