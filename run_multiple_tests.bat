@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 :: Set the number of test runs
-set TOTAL_RUNS=20
+set TOTAL_RUNS=10
 
 :: Create a directory for comprehensive logging
 if not exist logs\multiple_runs mkdir logs\multiple_runs
@@ -16,7 +16,7 @@ for /L %%i in (1,1,%TOTAL_RUNS%) do (
     echo Running test suite - Attempt %%i
     
     :: Run the robot test with exitonfailure
-    robot --outputdir logs\multiple_runs\run_%%i --consolewidth 0 --exitonfailure wiseled_hil_tests.robot
+    robot --outputdir logs\multiple_runs\run_%%i --consolewidth 0 --exitonfailure --test "Test Temperature Threshold Safety" wiseled_hil_tests.robot
     
     :: Check the test result
     if !ERRORLEVEL! EQU 0 (

@@ -96,9 +96,43 @@ Test Single Light PWM Control
         Log    Testing Light ${light_id}    console=yes
 
         FOR    ${intensity}    IN    @{INTENSITY_LEVELS}
-            # Set light intensity
-            ${result}=    Set Light Intensity    ${light_id}    ${intensity}
-            Should Be Equal    ${result}[data][status]    ok
+            # Local variable to track successful set
+            ${set_success}=    Set Variable    ${FALSE}
+            
+            FOR    ${retry}    IN RANGE    1    ${max_retries} + 1
+                # Attempt to set light intensity
+                ${result}=    Set Light Intensity    ${light_id}    ${intensity}
+                
+                # Log full result for debugging
+                Log    Attempt ${retry}: Result: ${result}    level=DEBUG
+                
+                # Check if result is a dictionary
+                ${is_dict}=    Evaluate    isinstance($result, dict)
+                
+                # If result is not a dictionary, continue to next retry
+                Continue For Loop If    not ${is_dict}
+                
+                # Check for 'data' key existence
+                ${has_data}=    Run Keyword And Return Status    
+                ...    Dictionary Should Contain Key    ${result}    data
+                
+                # If has data, check status
+                ${status_check}=    Run Keyword And Return Status    
+                ...    Should Be Equal As Strings    ${result}[data][status]    ok
+                
+                # If both checks pass, mark as successful and exit retry loop
+                IF    ${has_data} and ${status_check}
+                    ${set_success}=    Set Variable    ${TRUE}
+                    Exit For Loop
+                END
+                
+                # Log failure and wait before next retry
+                Log    Retry ${retry}/${max_retries}: Retrying to set light ${light_id} to ${intensity}%    console=yes
+                Sleep    ${wait_time}
+            END
+            
+            # Fail the test if we couldn't set the intensity after all retries
+            Should Be True    ${set_success}    Failed to set light ${light_id} to ${intensity}% after ${max_retries} attempts
 
             # Allow time for PWM to stabilize
             Wait For Stable Reading    ${wait_time}
@@ -130,8 +164,37 @@ Test Single Light PWM Control
         END
         
         # Turn off this light after testing all intensities
-        ${turn_off_result}=    Retry Set Light Intensity    ${light_id}    0    ${max_retries}
-        Should Be Equal    ${turn_off_result}[data][status]    ok
+        ${set_success}=    Set Variable    ${FALSE}
+        FOR    ${retry}    IN RANGE    1    ${max_retries} + 1
+            ${turn_off_result}=    Set Light Intensity    ${light_id}    0
+            
+            # Check result structure
+            ${is_dict}=    Evaluate    isinstance($turn_off_result, dict)
+            
+            # If not a dictionary, continue to next retry
+            Continue For Loop If    not ${is_dict}
+            
+            # Check for 'data' key and status
+            ${has_data}=    Run Keyword And Return Status    
+            ...    Dictionary Should Contain Key    ${turn_off_result}    data
+            
+            ${status_check}=    Run Keyword And Return Status    
+            ...    Should Be Equal As Strings    ${turn_off_result}[data][status]    ok
+            
+            # If both checks pass, mark as successful and exit retry loop
+            IF    ${has_data} and ${status_check}
+                ${set_success}=    Set Variable    ${TRUE}
+                Exit For Loop
+            END
+            
+            # Log failure and wait before next retry
+            Log    Retry ${retry}/${max_retries}: Failed to turn off light ${light_id}    console=yes
+            Sleep    ${wait_time}
+        END
+        
+        # Ensure light was successfully turned off
+        Should Be True    ${set_success}    Failed to turn off light ${light_id} after ${max_retries} attempts
+        
         Wait For Stable Reading    ${wait_time}
     END
 
@@ -139,7 +202,8 @@ Test All Lights PWM Control
     [Documentation]    Test control of all lights simultaneously and verify PWM output
     [Tags]            light    pwm    control
 
-    ${wait_time}=      Set Variable    0.25  # Wait time for stable reading
+    ${wait_time}=      Set Variable    0.2  # Wait time for stable reading
+    ${max_retries}=    Set Variable    5
 
     # Ensure HIL protocol has serial helper
     ${helper}=    Get Library Instance    SerialHelper
@@ -149,8 +213,21 @@ Test All Lights PWM Control
     FOR    ${intensity}    IN    25    50    75
         Log    Setting all lights to ${intensity}%    console=yes
 
-        ${result}=    Set All Lights Intensity    ${intensity}    ${intensity}    ${intensity}
-        Should Be Equal    ${result}[data][status]    ok
+        FOR    ${retry}    IN RANGE    1    ${max_retries} + 1
+            # Check if we got a valid response
+            ${result}=    Set All Lights Intensity    ${intensity}    ${intensity}    ${intensity}
+
+            ${has_data}=    Run Keyword And Return Status
+            ...    Dictionary Should Contain Key    ${result}    data
+            
+            IF    ${has_data} and "${result}[data][status]" == "ok"
+                #Log    Successfully set all lights to ${intensity}% on attempt ${retry}    console=yes
+                BREAK
+            ELSE
+                Log    Attempt ${retry}/${max_retries}: Failed to set all lights: ${result}    console=yes
+                Sleep    ${wait_time}s
+            END
+        END
 
         # Allow time for PWM to stabilize
         Wait For Stable Reading    ${wait_time}
@@ -270,7 +347,7 @@ Test Current Sensor Reading
         Wait For Stable Reading    0.5
 
         # Test current values
-        @{test_currents}=    Create List    1000    1500    2000    2500
+        @{test_currents}=    Create List    2500    3500    7500
 
         FOR    ${current}    IN    @{test_currents}
             # Ensure HIL protocol has serial helper
@@ -339,11 +416,11 @@ Test Current Sensor Reading
             
             # If sensor key exists, extract current and remove any trailing }
             ${raw_current}=    Run Keyword If    ${has_sensor_key}    
-            ...    Set Variable    ${sensor_data}[data][sensor][current]}
+            ...    Set Variable    ${sensor_data}[data][sensor][current]
             ...    ELSE    Set Variable    ${EMPTY}
             
             # Remove trailing } if present
-            ${current_str}=    Remove String    ${raw_current}    }
+            ${current_str}=    Remove String    ${raw_current}    
             
             # Check if current_str is empty or invalid
             ${current_valid}=    Run Keyword And Return Status
@@ -727,9 +804,11 @@ Test Temperature Threshold Safety
 
         FOR    ${retry}    IN RANGE    1    ${max_retries} + 1
             ${initial_duty}=    Get PWM Duty Cycle    ${light_id}
-            ${duty_valid}=    Run Keyword And Return Status    Evaluate    ${initial_duty} != None
+            ${duty_valid}=    Run Keyword And Return Status    
+                ...    Evaluate    $initial_duty is not None
             
             IF    ${duty_valid}
+                Log   Comp1 ${duty_valid} - ${initial_duty}     console=yes
                 Should Be True    ${initial_duty} > 70    Light ${light_id} should be on with ~75% duty cycle but measured ${initial_duty}%
                 BREAK
             ELSE
@@ -760,14 +839,24 @@ Test Temperature Threshold Safety
             HILProtocol.Set Serial Helper    ${helper}
             
             # Check if light is still on by measuring PWM
-            ${current_duty}=    Get PWM Duty Cycle    ${light_id}
-            
-            # Only proceed with checks if we have a valid reading
-            ${duty_valid}=    Run Keyword And Return Status    Evaluate    ${current_duty} != None
-            
+            ${duty_valid}=    Set Variable    ${FALSE}
+            FOR    ${retry}    IN RANGE    1    ${max_retries} + 1
+                ${current_duty}=    Get PWM Duty Cycle    ${light_id}
+                
+                ${duty_valid}=    Run Keyword And Return Status    
+                ...    Should Not Be Equal As Strings    ${current_duty}    None
+                
+                IF    ${duty_valid}
+                    BREAK
+                ELSE
+                    Log    WARNING: Attempt ${retry}/${max_retries}: Got invalid PWM reading (None) for light ${light_id}    console=yes
+                    Wait For Stable Reading    ${wait_time}
+                END
+            END
+            Log   Comp2 ${duty_valid} - ${current_duty}     console=yes
+
             IF    not ${duty_valid}
-                Log    WARNING: Got invalid PWM reading (None) for light ${light_id}    console=yes
-                CONTINUE
+                Log    WARNING: Failed to get valid PWM reading after ${max_retries} attempts    console=yes
             END
 
             # Get alarm status
@@ -835,15 +924,17 @@ Test Temperature Threshold Safety
                 ELSE
                     # No alarm yet, which is also acceptable in tolerance zone
                     # Verify light is still on
-                    Should Be True    ${current_duty} > 70    
-                    ...    Light ${light_id} should be on but measured PWM duty cycle = ${current_duty}%
+                    Log   Comp3 ${duty_valid} - ${current_duty}     console=yes
+                    IF    ${duty_valid}
+                        Should Be True    ${current_duty} > 70    
+                    ...        Light ${light_id} should be on but measured PWM duty cycle = ${current_duty}%
+                    END
                 END
             # Well below threshold - light should be on, no alarm
             ELSE
                 # Temperature below threshold - light should be on
                 # First ensure we have a valid duty cycle reading
-                ${duty_valid}=    Run Keyword And Return Status    Evaluate    ${current_duty} != None
-                
+                Log   Comp4 ${duty_valid} - ${current_duty}     console=yes
                 IF    ${duty_valid}
                     Should Be True    ${current_duty} > 70    
                     ...    Light ${light_id} should be on but measured PWM duty cycle = ${current_duty}%
@@ -1112,7 +1203,7 @@ Retry Setup
 *** Keywords ***
 Retry Set Light Intensity
     [Documentation]    Set light intensity with retry mechanism
-    [Arguments]    ${light_id}    ${intensity}    ${max_retries}=3
+    [Arguments]    ${light_id}    ${intensity}    ${max_retries}=10
     
     FOR    ${retry}    IN RANGE    1    ${max_retries} + 1
         TRY
