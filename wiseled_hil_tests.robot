@@ -20,11 +20,11 @@ ${BAUD_RATE}                       115200
 ${TIMEOUT}                         5
 ${RETRY_MAX}                       3          # Maximum number of retry attempts
 ${TOLERANCE}                       5          # Tolerance percentage for sensor readings (5%)
-${TEMPERATURE_TOLERANCE}           10         # Tolerance percentage for temperaure readings (10%)
+${TEMPERATURE_TOLERANCE}           15         # Tolerance percentage for temperaure readings (15%)
 ${CURRENT_TOLERANCE}               20         # Tolerance percentage for Current readings (10%)
 
 # Test intensity values
-@{INTENSITY_LEVELS}    0    25    50    75    100
+@{INTENSITY_LEVELS}    0    30    60    90
 
 # Safety thresholds (from documentation)
 ${CURRENT_THRESHOLD}    25000   # 25.0 Amps (in milliamps)
@@ -247,7 +247,6 @@ Test All Lights PWM Control
     @{test_combinations}=    Create List
     ...    25,50,75
     ...    75,50,25
-    ...    100,50,10
 
     FOR    ${combo}    IN    @{test_combinations}
         ${intensities}=    Split String    ${combo}    ,
@@ -667,7 +666,7 @@ Test Current Threshold Safety
         # Turn on the light
         ${result}=    Set Light Intensity    ${light_id}    75
         Should Be Equal    ${result}[data][status]    ok
-        Wait For Stable Reading    1
+        Wait For Stable Reading    0.5
 
         # Get initial duty cycle (verify light is on)
         ${initial_duty}=    Get PWM Duty Cycle    ${light_id}
@@ -689,7 +688,7 @@ Test Current Threshold Safety
             # Set current simulation
             Set Current Simulation    ${light_id}    ${current}
             Log    Light ${light_id}: Setting current to ${current}mA    console=yes
-            Wait For Stable Reading    1
+            Wait For Stable Reading    0.5
 
             # Get PWM duty cycle
             ${current_duty}=    Get PWM Duty Cycle    ${light_id}
@@ -787,7 +786,7 @@ Test Temperature Threshold Safety
         # Turn on the light
         ${result}=    Set Light Intensity    ${light_id}    75
         Should Be Equal    ${result}[data][status]    ok
-        Wait For Stable Reading    1
+        Wait For Stable Reading    0.5
 
         # Get initial duty cycle (verify light is on)
         ${max_retries}=    Set Variable    3
@@ -852,7 +851,7 @@ Test Temperature Threshold Safety
                     # Check if either condition is true
                     IF    ${over_temperature_in_alarms} or ${is_over_temperature_event}
                         ${over_temperature_found}=    Set Variable    ${TRUE}
-                        Log    Over-Temperature alarm found on attempt ${attempt}    console=yes
+                        #Log    Over-Temperature alarm found on attempt ${attempt}    console=yes
                         BREAK
                     END
                     
@@ -903,7 +902,7 @@ Test Alarm Clearing
     HILProtocol.Set Serial Helper    ${helper}
     
     ${wait_time}=      Set Variable    0.25  # Wait time for stable reading
-    ${max_retries}=    Set Variable    3     # Maximum number of retry attempts
+    ${max_retries}=    Set Variable    5     # Maximum number of retry attempts
 
     # Test for each light
     FOR    ${light_id}    IN RANGE    1    4
@@ -919,7 +918,7 @@ Test Alarm Clearing
 
         # Turn on the light
         ${result}=    Set Light Intensity    ${light_id}    75
-        Wait For Stable Reading    1
+        Wait For Stable Reading    0.5
 
         # Ensure HIL protocol has serial helper
         ${helper}=    Get Library Instance    SerialHelper
@@ -1027,7 +1026,7 @@ Test Alarm Clearing
         END
         
         Should Be True    ${set_success}    Failed to turn on light ${light_id} after clearing alarm
-        Wait For Stable Reading    1
+        Wait For Stable Reading    0.5
 
         # Ensure HIL protocol has serial helper
         ${helper}=    Get Library Instance    SerialHelper

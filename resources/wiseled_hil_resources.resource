@@ -313,7 +313,7 @@ Verify Value Within Tolerance
     IF    ${within_tolerance}
         Log    ✓ ${name} within tolerance: Expected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%      console=yes
     ELSE
-        Log    - ${name} outside tolerance: Expected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%    level=WARN    console=yes
+        Log    - ${name} outside tolerance: Ex2pected ${expected}, Actual ${actual}, Tolerance ±${tolerance_percent}%    level=WARN    console=yes
     END
     
     RETURN    ${within_tolerance}
