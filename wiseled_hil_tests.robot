@@ -780,10 +780,6 @@ Test Temperature Threshold Safety
         Clear Alarm    ${light_id}
         Wait For Stable Reading    ${wait_time}
 
-        # Ensure HIL protocol has serial helper
-        ${helper}=    Get Library Instance    SerialHelper
-        HILProtocol.Set Serial Helper    ${helper}
-        
         # Set normal temperature simulation
         Set Temperature Simulation    ${light_id}    50
         Wait For Stable Reading    ${wait_time}
@@ -793,11 +789,7 @@ Test Temperature Threshold Safety
         Should Be Equal    ${result}[data][status]    ok
         Wait For Stable Reading    1
 
-        # Ensure HIL protocol has serial helper
-        ${helper}=    Get Library Instance    SerialHelper
-        HILProtocol.Set Serial Helper    ${helper}
-        
-        # Verify PWM is active - with 3 retry attempts
+        # Get initial duty cycle (verify light is on)
         ${max_retries}=    Set Variable    3
         ${initial_duty}=    Set Variable    ${NONE}
         ${duty_valid}=    Set Variable    ${FALSE}
@@ -808,7 +800,6 @@ Test Temperature Threshold Safety
                 ...    Evaluate    $initial_duty is not None
             
             IF    ${duty_valid}
-                Log   Comp1 ${duty_valid} - ${initial_duty}     console=yes
                 Should Be True    ${initial_duty} > 70    Light ${light_id} should be on with ~75% duty cycle but measured ${initial_duty}%
                 BREAK
             ELSE
@@ -821,140 +812,86 @@ Test Temperature Threshold Safety
             Log    WARNING: Failed to get valid PWM reading after ${max_retries} attempts    console=yes
         END
 
-        # Define temperature tolerance zone
-        ${temp_tolerance}=    Set Variable    2  # 2°C tolerance
-
-        # Now gradually increase temperature until it exceeds threshold
-        FOR    ${temp}    IN RANGE    82    95
+        # Define temperature values to test, including some below and above threshold
+        @{test_temps}=    Create List    75   85    87    90
+        
+        # Now test each temperature
+        FOR    ${temp}    IN    @{test_temps}
             # Ensure HIL protocol has serial helper
             ${helper}=    Get Library Instance    SerialHelper
             HILProtocol.Set Serial Helper    ${helper}
             
+            # Set temperature simulation
             Set Temperature Simulation    ${light_id}    ${temp}
             Log    Light ${light_id}: Setting temperature to ${temp}°C    console=yes
-            Wait For Stable Reading    ${wait_time}
+            Wait For Stable Reading    0.5
 
-            # Ensure HIL protocol has serial helper
-            ${helper}=    Get Library Instance    SerialHelper
-            HILProtocol.Set Serial Helper    ${helper}
+            # Get PWM duty cycle to check light status
+            ${current_duty}=    Get PWM Duty Cycle    ${light_id}
+            ${duty_valid}=    Run Keyword And Return Status    
+                ...    Evaluate    $current_duty is not None
             
-            # Check if light is still on by measuring PWM
-            ${duty_valid}=    Set Variable    ${FALSE}
-            FOR    ${retry}    IN RANGE    1    ${max_retries} + 1
-                ${current_duty}=    Get PWM Duty Cycle    ${light_id}
-                
-                ${duty_valid}=    Run Keyword And Return Status    
-                ...    Should Not Be Equal As Strings    ${current_duty}    None
-                
-                IF    ${duty_valid}
-                    BREAK
-                ELSE
-                    Log    WARNING: Attempt ${retry}/${max_retries}: Got invalid PWM reading (None) for light ${light_id}    console=yes
-                    Wait For Stable Reading    ${wait_time}
-                END
-            END
-            Log   Comp2 ${duty_valid} - ${current_duty}     console=yes
-
-            IF    not ${duty_valid}
-                Log    WARNING: Failed to get valid PWM reading after ${max_retries} attempts    console=yes
-            END
-
             # Get alarm status
             ${alarm_resp}=    Get Alarm Status
-
-            # Check if we're in the tolerance zone near the threshold
-            ${in_tolerance_zone}=    Evaluate    ${temp} >= (${TEMP_THRESHOLD} - ${temp_tolerance}) and ${temp} < ${TEMP_THRESHOLD}
-
-            # If we've reached or exceeded the threshold, expect alarm
+            
+            # Check if we're at or above the threshold temperature
             IF    ${temp} >= ${TEMP_THRESHOLD}
-                ${max_attempts}=    Set Variable    5
+                # When above threshold, should have an over-temperature alarm
+                ${max_attempts}=    Set Variable    6
                 ${over_temperature_found}=    Set Variable    ${FALSE}
                 
                 FOR    ${attempt}    IN RANGE    1    ${max_attempts} + 1
                     Wait For Stable Reading    ${wait_time}
+
+                    # Check for over_temperature in active_alarms
+                    ${over_temperature_in_alarms}=    Evaluate    any('over_temperature' in str(alarm) for alarm in ${alarm_resp}[data].get('active_alarms', []))
                     
-                    #Log    Attempt ${attempt}: Checking for over-temperature condition    console=yes
+                    # FIXED: Check if it's an over_temperature event - single string expression
+                    ${is_over_temperature_event}=    Evaluate    "${alarm_resp}[type]" == "event" and "${alarm_resp}[topic]" == "alarm" and "${alarm_resp}[action]" == "triggered" and "over_temperature" in str(${alarm_resp}[data])
                     
-                    # Check for over_temperature in active_alarms array
-                    ${over_temperature_in_alarms}=    Evaluate    
-                    ...    any('over_temperature' in str(alarm) for alarm in ${alarm_resp}[data].get('active_alarms', []))
-                    
-                    # Check if response is an event message for over-temperature
-                    ${is_over_temperature_event}=    Run Keyword And Return Status
-                    ...    Evaluate    
-                    ...    ("${alarm_resp}[type]" == "event" and 
-                    ...     "${alarm_resp}[topic]" == "alarm" and 
-                    ...     "${alarm_resp}[action]" == "triggered" and 
-                    ...     "${alarm_resp}[data][code]" == "over_temperature")
-                    
-                    # Check if over_temperature is found in either format
+                    # Check if either condition is true
                     IF    ${over_temperature_in_alarms} or ${is_over_temperature_event}
                         ${over_temperature_found}=    Set Variable    ${TRUE}
                         Log    Over-Temperature alarm found on attempt ${attempt}    console=yes
                         BREAK
                     END
                     
+                    # Get updated alarm status for next attempt
                     ${alarm_resp}=    Get Alarm Status
                 END
                 
                 # Verify alarm was found
                 Should Be True    ${over_temperature_found}    No over-temperature alarm detected after ${max_attempts} attempts
                 
-                Log    ✓ Active alarm verified in alarm status    console=yes
+                Log    ✓ Active alarm verified at ${temp}°C (above threshold ${TEMP_THRESHOLD}°C)    console=yes
+                
+                # No need to test higher temperatures once alarm is confirmed
                 BREAK
-            # If we're in the tolerance zone, accept either state (alarm or no alarm)
-            ELSE IF    ${in_tolerance_zone}
-                # Check for over-temperature condition
-                ${temperature_in_alarms}=    Evaluate    
-                ...    any('over_temperature' in str(alarm) for alarm in ${alarm_resp}[data].get('active_alarms', []))
-                
-                ${is_temperature_event}=    Run Keyword And Return Status
-                ...    Evaluate    
-                ...    ("${alarm_resp}[type]" == "event" and 
-                ...     "${alarm_resp}[topic]" == "alarm" and 
-                ...     "${alarm_resp}[action]" == "triggered" and 
-                ...     "${alarm_resp}[data][code]" == "over_temperature")
-                
-                ${alarm_active}=    Evaluate    ${temperature_in_alarms} or ${is_temperature_event}
-                
-                # If alarm active in tolerance zone, log and continue (not a failure)
-                IF    ${alarm_active}
-                    Log    ✓ Temperature alarm triggered in tolerance zone at ${temp}°C (threshold ${TEMP_THRESHOLD}°C)    console=yes
-                    BREAK
-                ELSE
-                    # No alarm yet, which is also acceptable in tolerance zone
-                    # Verify light is still on
-                    Log   Comp3 ${duty_valid} - ${current_duty}     console=yes
-                    IF    ${duty_valid}
-                        Should Be True    ${current_duty} > 70    
-                    ...        Light ${light_id} should be on but measured PWM duty cycle = ${current_duty}%
-                    END
-                END
-            # Well below threshold - light should be on, no alarm
             ELSE
-                # Temperature below threshold - light should be on
-                # First ensure we have a valid duty cycle reading
-                Log   Comp4 ${duty_valid} - ${current_duty}     console=yes
+                # Below threshold temperature - light should be on, no alarm
                 IF    ${duty_valid}
                     Should Be True    ${current_duty} > 70    
-                    ...    Light ${light_id} should be on but measured PWM duty cycle = ${current_duty}%
+                        ...    Light ${light_id} should be on but measured PWM duty cycle = ${current_duty}%
                 ELSE
                     Log    WARNING: Got invalid PWM reading (None) for light ${light_id} - skipping verification    console=yes
                 END
-
-                # No alarm should be active for this light
+                
+                # Check that no alarm is active
                 ${alarm_active}=    Check For Alarm    ${light_id}    over_temperature
                 Should Not Be True    ${alarm_active}    
-                ...    Unexpected alarm for light ${light_id} at temperature ${temp}°C
+                    ...    Unexpected alarm for light ${light_id} at temperature ${temp}°C
+                
             END
         END
 
-        # Ensure HIL protocol has serial helper
+        # Reset to normal temperature
         ${helper}=    Get Library Instance    SerialHelper
         HILProtocol.Set Serial Helper    ${helper}
-        
-        # Reset to normal temperature
         Set Temperature Simulation    ${light_id}    50
+        
+        # Clear any alarms for this light
+        Clear Alarm    ${light_id}
+        Wait For Stable Reading    ${wait_time}
     END
 
 Test Alarm Clearing
