@@ -73,6 +73,7 @@ Test Single Light PWM Control
     [Documentation]    Test control of each individual light and verify PWM output
     [Tags]            light    pwm    control
     ${wait_time}=      Set Variable    0.25  # Wait time for stable reading
+    ${max_retries}=    Set Variable    3     # Maximum number of retries for light control
 
     # Ensure HIL protocol has serial helper
     ${helper}=    Get Library Instance    SerialHelper
@@ -129,7 +130,7 @@ Test Single Light PWM Control
         END
         
         # Turn off this light after testing all intensities
-        ${turn_off_result}=    Set Light Intensity    ${light_id}    0
+        ${turn_off_result}=    Retry Set Light Intensity    ${light_id}    0    ${max_retries}
         Should Be Equal    ${turn_off_result}[data][status]    ok
         Wait For Stable Reading    ${wait_time}
     END
@@ -371,7 +372,7 @@ Test Current Sensor Reading
         END
         
         # Turn off the light after testing
-        ${turn_off_result}=    Set Light Intensity    ${light_id}    0
+        ${turn_off_result}=    Retry Set Light Intensity    ${light_id}    0    ${max_retries}
         Log    Turned off Light ${light_id} after testing    console=yes
     END
 
@@ -553,7 +554,7 @@ Test Temperature Sensor Reading
         END
         
         # Turn off the light after testing
-        ${turn_off_result}=    Set Light Intensity    ${light_id}    0
+        ${turn_off_result}=    Retry Set Light Intensity    ${light_id}    0    ${max_retries}
         Log    Turned off Light ${light_id} after testing    console=yes
     END
 
@@ -1102,3 +1103,49 @@ Setup Safe Conditions
     EXCEPT    AS    ${error}
         Log    Error setting hardware simulation: ${error}    console=yes
     END
+
+*** Keywords ***
+Retry Setup
+    [Documentation]    Setup keyword to prepare for potential retries
+    # You can add any global setup logic here if needed
+
+*** Keywords ***
+Retry Set Light Intensity
+    [Documentation]    Set light intensity with retry mechanism
+    [Arguments]    ${light_id}    ${intensity}    ${max_retries}=3
+    
+    FOR    ${retry}    IN RANGE    1    ${max_retries} + 1
+        TRY
+            ${result}=    Run Keyword    Set Light Intensity    ${light_id}    ${intensity}
+            
+            # Log the full result for debugging
+            Log    Attempt ${retry}: Received result: ${result}    level=DEBUG
+            
+            # Check if result is a dictionary
+            ${is_dict}=    Evaluate    isinstance($result, dict)
+            Run Keyword If    not ${is_dict}    Fail    Received non-dictionary response
+            
+            # Check for 'data' key and its 'status'
+            ${status_check}=    Run Keyword And Return Status    
+            ...    Should Be Equal As Strings    ${result}[data][status]    ok
+            
+            # Exit loop if status is ok
+            Run Keyword If    ${status_check}    Exit For Loop
+            
+            # Log failure and wait
+            Log    Retry ${retry}/${max_retries}: Invalid response status    console=yes
+            Sleep    0.5s
+            
+        EXCEPT    AS    ${error}
+            Log    Retry ${retry}/${max_retries}: Failed to set light ${light_id} to ${intensity}%. Error: ${error}    console=yes
+            Sleep    0.5s
+        END
+        
+        # If this is the last retry, re-raise the exception
+        IF    ${retry} == ${max_retries}
+            Fail    Failed to set light ${light_id} to ${intensity}% after ${max_retries} attempts
+        END
+    END
+    
+    # Return the result after successful attempt
+    RETURN    ${result}
